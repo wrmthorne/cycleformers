@@ -1,0 +1,82 @@
+[tool.poetry]
+name = "CycleFormers"
+packages = [
+    { from = "src", include = "CycleFormers" },
+]
+version = "0.1.0"
+description = "A comprehensive implementation of the cycle-consistency training paradigm, extending the Huggingface Transformers trainer API to accommodate arbitrary combinations of generative models."
+authors = ["William Thorne <wthorne1@sheffield.ac.uk>"]
+license = "Attribution 4.0 International"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+transformers = "^4.46.1"
+torch = "^2.5.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.3.3"
+pre-commit = "^4.0.1"
+ruff = "^0.7.1"
+mypy = "^1.13.0"
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+# Same as Transformers.
+line-length = 119
+indent-width = 4
+
+target-version = "py311"
+
+[tool.ruff.lint]
+# Same as Transformers.
+ignore = ["C901", "E501", "E741", "F402", "F823" ]
+select = ["C", "E", "F", "I", "W"]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["cycleformers"]
+
+[tool.ruff.format]
+# Same as Transformers.
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.per-file-ignores]
+# Ignore import violations in all `__init__.py` files.
+"__init__.py" = ["F401"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
