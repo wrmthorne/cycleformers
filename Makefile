@@ -6,16 +6,20 @@ PROJECT_DIRS = $(SOURCE_DIR) $(TEST_DIR)
 PWD := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
 PROJECT_NAME ?= CycleFormers
 PROJECT_VERSION ?= v$(shell poetry version -s)
-PYTHON_VERSION ?= 3.10
+PYTHON_VERSION ?= 3.11
 .DEFAULT_GOAL := all
 
 .PHONY: init-env init check-toml lint-src format lint audit test all clean info
 
 init-env:
-	@echo "Creating .env file..."
-	@touch .env
-	@echo "PROJECT_NAME=${PROJECT_NAME}" >> .env
-	@echo "PYTHON_VERSION=${PYTHON_VERSION}" >> .env
+	@if [ ! -f .env ]; then \
+		echo "Creating .env file..."; \
+		echo "PROJECT_NAME=${PROJECT_NAME}" > .env; \
+		echo "PYTHON_VERSION=${PYTHON_VERSION}" >> .env; \
+		echo "export PYTHONPATH=${SOURCE_DIR}" >> .env; \
+	else \
+		echo "using existing .env file..."; \
+	fi
 
 init: init-env
 	@echo "Installing dependencies..."

@@ -13,12 +13,24 @@ readme = "README.md"
 python = "^3.11"
 transformers = "^4.46.1"
 torch = "^2.5.0"
+datasets = "^3.0.2"
+matplotlib = "^3.9.2"
+gputil = "^1.4.0"
+rich = "^13.9.3"
+trl = "^0.11.4"
 
 [tool.poetry.dev-dependencies]
 pytest = "^8.3.3"
 pre-commit = "^4.0.1"
 ruff = "^0.7.1"
 mypy = "^1.13.0"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+
+[tool.poetry.group.peft.dependencies]
+peft = "^0.13.2"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
@@ -60,7 +72,18 @@ target-version = "py311"
 [tool.ruff.lint]
 # Same as Transformers.
 ignore = ["C901", "E501", "E741", "F402", "F823" ]
-select = ["C", "E", "F", "I", "W"]
+select = [
+    "C",
+    "E",
+    "F",
+    "I",
+    "W",
+    "UP006",  # Use built-in types instead of typing ones (list vs List)
+    "UP007",  # Use | instead of Union
+    "UP008",  # Use | None instead of Optional
+    "UP009",  # Use collections.abc instead of typing
+    "UP035",  # Remove redundant unions
+]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
