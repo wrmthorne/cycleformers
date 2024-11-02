@@ -1,1 +1,1 @@
-from .peft_models import PeftCycleModelForSeq2SeqLM, CycleCollatorForSeq2SeqLM
+from .peft_models import PeftCycleModelForSeq2SeqLM, CycleCollatorForSeq2SeqLM, CycleAdapterConfig

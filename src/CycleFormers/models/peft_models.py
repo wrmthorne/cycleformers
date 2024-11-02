@@ -1,9 +1,11 @@
 from dataclasses import dataclass
+from typing import Any
 
 import torch
-from transformers import DataCollatorForSeq2Seq
+from torch import nn
+from transformers import DataCollatorForSeq2Seq, GenerationConfig, PreTrainedModel, PreTrainedTokenizer
 from transformers.modeling_outputs import ModelOutput
-from peft import PeftModelForSeq2SeqLM
+from peft import LoraConfig, PeftModelForSeq2SeqLM, get_peft_model
 
 
 @dataclass
@@ -14,7 +16,15 @@ class CycleOutput(ModelOutput):
     reconstruction_tokens: torch.Tensor | None = None
 
 
-# TODO: Move later - May not be necessary
+@dataclass
+class CycleAdapterConfig:
+    adapter_name: str
+    peft_config: LoraConfig | None = None
+    low_cpu_mem_usage: bool = False # Strongly recommended not to set to True
+    is_pretrained: bool = False
+    generation_config: GenerationConfig | None = None
+
+
 class CycleCollatorForSeq2SeqLM(DataCollatorForSeq2Seq):
     def __init__(self, *args, **kwargs):
         self.adapter_to_idx = kwargs.pop("adapter_to_idx", None)
@@ -24,65 +34,24 @@ class CycleCollatorForSeq2SeqLM(DataCollatorForSeq2Seq):
         for feature in features:
             feature["train_adapter_idx"] = self.adapter_to_idx[feature.pop("train_adapter")]
         return super().__call__(features)
-    
+
 
 class PeftCycleModelForSeq2SeqLM(PeftModelForSeq2SeqLM):
-    """A PEFT model wrapper that handles the logic for cycle training.
+    def __init__(self, model, tokenizer, adapter_configs: list[CycleAdapterConfig], **kwargs):
+        super().__init__(model, peft_config=LoraConfig(), **kwargs)
+        # TODO: Replace this. Hack to use class setup and not have to pass in a config
+        self.delete_adapter("default")
 
-    This model extends PeftModelForSeq2SeqLM to support cycle training, where multiple adapters are used in sequence
-    to generate synthetic samples and reconstructions. One adapter is trained while others are used for inference.
-    The model can support an arbitrary number of adapters per cycle. The model is designed to be used with the
-    CycleTrainer.
+        self.processing_class = tokenizer
+        self.adapter_configs = {config.adapter_name: config for config in adapter_configs}
 
-    Args:
-        model (:obj:`PreTrainedModel`): The base model to apply PEFT adapters to
-        tokenizer (:obj:`PreTrainedTokenizer`): The tokenizer associated with the model
-        peft_config (:obj:`PeftConfig`): The PEFT configuration for the adapters
-        **kwargs: Additional keyword arguments passed to PeftModelForSeq2SeqLM
-
-    WARNING: This API will change in the future.
-
-    Example::
-
-        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-        from peft import LoraConfig
-        from CycleFormers.models import PeftCycleModelForSeq2SeqLM
-
-        # Initialize base model and tokenizer
-        base_model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        tokenizer = AutoTokenizer.from_pretrained("t5-base")
-
-        # Create PEFT config
-        peft_config = LoraConfig(
-            task_type="SEQ_2_SEQ_LM",
-            r=8,
-            lora_alpha=32,
-            target_modules=["q", "v"]
-        )
-
-        # Create cycle model with two adapters
-        model = PeftCycleModelForSeq2SeqLM(
-            model=base_model,
-            tokenizer=tokenizer, 
-            peft_config=peft_config,
-            adapter_name="adapter_a"
-        )
-        model.add_adapter("adapter_b", peft_config)
-
-        # Prepare inputs
-        inputs = tokenizer("Translate to French: Hello world!", return_tensors="pt")
-        
-        # Forward pass with adapter_a as training adapter
-        outputs = model(
-            **inputs,
-            train_adapter_idx=torch.tensor([0])  # adapter_a's index
-        )
-    """
-
-    def __init__(self, model, tokenizer, peft_config, **kwargs):
-        super().__init__(model, peft_config, **kwargs)
-        self.tokenizer = tokenizer
-        # TODO: Modify to receive dataclasses of models, etc.
+        for config in adapter_configs:
+            if config.is_pretrained:
+                self.load_adapter(config.adapter_name)
+            elif config.peft_config is not None:
+                self.add_adapter(config.adapter_name, config.peft_config)
+            else:
+                raise ValueError("PeftConfig is required for non-pretrained adapters")
 
     @property
     def adapter_to_idx(self):
@@ -103,75 +72,28 @@ class PeftCycleModelForSeq2SeqLM(PeftModelForSeq2SeqLM):
         train_adapter_idx=None, # idx to pass to cuda
         labels=None,
         **kwargs
-    ) -> torch.Tensor | CycleOutput:
-        """Forward pass for cycle training.
+    ) -> torch.Tensor | CycleOutput:    
 
-        This method implements the cycle training logic:
-        1. Uses non-training adapters to generate synthetic samples from the input
-        2. Uses the training adapter to reconstruct the original input from the synthetic samples
-        3. Computes the loss between reconstructions and original input
-
-        Args:
-            input_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`):
-                Input token ids.
-            attention_mask (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
-                Mask to avoid attention on padding token indices.
-            train_adapter_idx (:obj:`torch.LongTensor` of shape :obj:`(1,)`):
-                Index of the adapter to train. Other adapters will be used for generation.
-            labels (:obj:`torch.LongTensor`, `optional`):
-                Not supported - will raise ValueError if provided.
-            **kwargs: Additional arguments passed to the base model's forward method.
-
-        Returns:
-            :class:`~CycleOutput`: A dataclass containing:
-                - loss (:obj:`torch.FloatTensor`, `optional`): The reconstruction loss
-                - logits (:obj:`torch.FloatTensor`): The model's output logits
-                - synthetic_tokens (:obj:`torch.LongTensor`): Generated synthetic tokens
-                - reconstruction_tokens (:obj:`torch.LongTensor`): Generated reconstruction tokens
-
-        Raises:
-            ValueError: If labels are provided or if train_adapter_idx is invalid
-        """     
-        if labels is not None:
-            raise ValueError("Labels are not supported in this model. They are calculated internally from the input_ids.")
-
-        labels = input_ids.clone()
-        padding_mask = (labels == self.tokenizer.pad_token_id)
-        labels[padding_mask] = -100 # TODO: Make this dynamic
+        labels = labels or self.prepare_labels(input_ids)
 
         # Split out the train adapter from the generation adapters
-        # TODO: Need to enforce order or add ability to pass custom cycle order - would allow for multiple loops before training
         adapter_names = set(self.peft_config) # Gets names of all adapters
-        if not self.idx_to_adapter[int(train_adapter_idx[0])] in adapter_names:
+        train_adapter_name = self.idx_to_adapter.get(int(train_adapter_idx[0]), None)
+        if not train_adapter_name in adapter_names:
             raise ValueError(f"Unknown adapter index: {train_adapter_idx}. Must be one of {self.idx_to_adapter}")
         
-        train_adapter_name = self.idx_to_adapter[int(train_adapter_idx[0])]
         adapter_names.remove(train_adapter_name)
+        cycle_adapters = list(adapter_names) + [train_adapter_name]
+        synthetic_outputs = self.generate_synthetic_samples(
+            cycle_adapters,
+            input_ids=input_ids,
+            attention_mask=attention_mask
+        )
 
-        # Step 1: Generate synthetic samples with first adapter
-        for adapter in adapter_names:
-            self.set_adapter(adapter)
-            with torch.inference_mode():
-                synthetic_tokens = self.generate(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    max_length=len(input_ids) + 100, # TODO: Make this dynamic
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    bos_token_id=self.tokenizer.bos_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id
-                )
-
-                # TODO: Add intermediate token manipulation call
-
-        # Step 2: Generate reconstructions with second adapter
+        # Step 2: Calculate reconstruction error
         self.set_adapter(train_adapter_name)
-
-        synthetic_attention_mask = (synthetic_tokens != self.tokenizer.pad_token_id).long()
-
-        # Step 3: Generate reconstructions
         outputs = super().forward(
-            input_ids=synthetic_tokens,
-            attention_mask=synthetic_attention_mask,
+            **synthetic_outputs,
             labels=input_ids.clone(),
             **kwargs
         )
@@ -179,6 +101,32 @@ class PeftCycleModelForSeq2SeqLM(PeftModelForSeq2SeqLM):
         return CycleOutput(
             loss=outputs.loss,
             logits=outputs.logits,
-            synthetic_tokens=synthetic_tokens,
+            synthetic_tokens=synthetic_outputs["input_ids"],
             reconstruction_tokens=outputs.logits.argmax(dim=-1)
         )
+    
+    def prepare_labels(self, input_ids):
+        """Prepares labels from input_ids for use in the reconstruction loss."""
+        labels = input_ids.clone()
+        padding_mask = (labels == self.processing_class.pad_token_id)
+        labels[padding_mask] = -100 # TODO: Make this dynamic
+        return labels
+
+    def prepare_tokens_for_cycle_step(self, target_adapter: str, **inputs) -> dict:
+        """Prepares tokens for the next cycle step."""
+        attention_mask = (inputs["input_ids"] != self.processing_class.pad_token_id).long()
+        inputs["attention_mask"] = attention_mask
+        return inputs
+
+    def generate_synthetic_samples(self, cycle_adapters: list[str], **inputs):
+        """Generates synthetic samples using provided adapters."""
+        for current_adapter, next_adapter in zip(cycle_adapters, cycle_adapters[1:]):
+            self.set_adapter(current_adapter)
+            with torch.inference_mode():
+                generation_config = self.adapter_configs[current_adapter].generation_config
+                synthetic_outputs = self.generate(
+                    **inputs,
+                    generation_config=generation_config
+                )
+                inputs = self.prepare_tokens_for_cycle_step(next_adapter, input_ids=synthetic_outputs)
+        return inputs
