@@ -12,6 +12,8 @@
 
 CycleFormers exposes a high-level but finely configurable API for transformer-based cycle-consistent architectures. The primary objective of the library is to provide a very simple framework to start using that works, out-of-the-box on as wide a range of hardware configurations as possible. This will enable quick iteration in training and research. The priority of flexibility is not limited to hardware - we aim to offer an interface that enforces no restrictions on the data, models (or number thereof), and enable immediate access to the latest versions of the Huggingface ecosystem. The fragmentation of training scripts for cycle-consistency across different domains, backend packages, and hardware selections has required frequent reimplementaion of the same idea to resolve implementation level details when the goal is to investigate the applications of the paradigm.
 
+`NOTE:` The current pre-release build only supports Multi-Adapter Cycle-Consistency Training (MACCT) while general model-to-model training is implemented. All existing APIs are subject to change. I will do my best to update docs and indicate deprecations if/when they do.
+
 ## Features
 
 - 🚀 High-performance transformer implementations
@@ -24,6 +26,11 @@ CycleFormers exposes a high-level but finely configurable API for transformer-ba
 
 ```bash
 pip install CycleFormers
+```
+
+## Multi-Adapter Cycle-Consistency Training (MACCT)
+
+```python
 ```
 
 ## Citing

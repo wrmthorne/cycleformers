@@ -100,6 +100,12 @@ line-ending = "auto"
 # Ignore import violations in all `__init__.py` files.
 "__init__.py" = ["F401"]
 
+[tool.pytest]
+markers = [
+    "slow: mark test as slow to run",
+    "meta: mark test as testing fixtures or helper functions"
+]
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

@@ -27,6 +27,58 @@ class CycleCollatorForSeq2SeqLM(DataCollatorForSeq2Seq):
     
 
 class PeftCycleModelForSeq2SeqLM(PeftModelForSeq2SeqLM):
+    """A PEFT model wrapper that handles the logic for cycle training.
+
+    This model extends PeftModelForSeq2SeqLM to support cycle training, where multiple adapters are used in sequence
+    to generate synthetic samples and reconstructions. One adapter is trained while others are used for inference.
+    The model can support an arbitrary number of adapters per cycle. The model is designed to be used with the
+    CycleTrainer.
+
+    Args:
+        model (:obj:`PreTrainedModel`): The base model to apply PEFT adapters to
+        tokenizer (:obj:`PreTrainedTokenizer`): The tokenizer associated with the model
+        peft_config (:obj:`PeftConfig`): The PEFT configuration for the adapters
+        **kwargs: Additional keyword arguments passed to PeftModelForSeq2SeqLM
+
+    WARNING: This API will change in the future.
+
+    Example::
+
+        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+        from peft import LoraConfig
+        from CycleFormers.models import PeftCycleModelForSeq2SeqLM
+
+        # Initialize base model and tokenizer
+        base_model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
+        tokenizer = AutoTokenizer.from_pretrained("t5-base")
+
+        # Create PEFT config
+        peft_config = LoraConfig(
+            task_type="SEQ_2_SEQ_LM",
+            r=8,
+            lora_alpha=32,
+            target_modules=["q", "v"]
+        )
+
+        # Create cycle model with two adapters
+        model = PeftCycleModelForSeq2SeqLM(
+            model=base_model,
+            tokenizer=tokenizer, 
+            peft_config=peft_config,
+            adapter_name="adapter_a"
+        )
+        model.add_adapter("adapter_b", peft_config)
+
+        # Prepare inputs
+        inputs = tokenizer("Translate to French: Hello world!", return_tensors="pt")
+        
+        # Forward pass with adapter_a as training adapter
+        outputs = model(
+            **inputs,
+            train_adapter_idx=torch.tensor([0])  # adapter_a's index
+        )
+    """
+
     def __init__(self, model, tokenizer, peft_config, **kwargs):
         super().__init__(model, peft_config, **kwargs)
         self.tokenizer = tokenizer
@@ -52,11 +104,36 @@ class PeftCycleModelForSeq2SeqLM(PeftModelForSeq2SeqLM):
         labels=None,
         **kwargs
     ) -> torch.Tensor | CycleOutput:
-        """
-        Forward pass that handles one complete cycle. Handles an 
-        """        
+        """Forward pass for cycle training.
+
+        This method implements the cycle training logic:
+        1. Uses non-training adapters to generate synthetic samples from the input
+        2. Uses the training adapter to reconstruct the original input from the synthetic samples
+        3. Computes the loss between reconstructions and original input
+
+        Args:
+            input_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`):
+                Input token ids.
+            attention_mask (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`):
+                Mask to avoid attention on padding token indices.
+            train_adapter_idx (:obj:`torch.LongTensor` of shape :obj:`(1,)`):
+                Index of the adapter to train. Other adapters will be used for generation.
+            labels (:obj:`torch.LongTensor`, `optional`):
+                Not supported - will raise ValueError if provided.
+            **kwargs: Additional arguments passed to the base model's forward method.
+
+        Returns:
+            :class:`~CycleOutput`: A dataclass containing:
+                - loss (:obj:`torch.FloatTensor`, `optional`): The reconstruction loss
+                - logits (:obj:`torch.FloatTensor`): The model's output logits
+                - synthetic_tokens (:obj:`torch.LongTensor`): Generated synthetic tokens
+                - reconstruction_tokens (:obj:`torch.LongTensor`): Generated reconstruction tokens
+
+        Raises:
+            ValueError: If labels are provided or if train_adapter_idx is invalid
+        """     
         if labels is not None:
-            raise ValueError("Labels are not supported in this model")
+            raise ValueError("Labels are not supported in this model. They are calculated internally from the input_ids.")
 
         labels = input_ids.clone()
         padding_mask = (labels == self.tokenizer.pad_token_id)
