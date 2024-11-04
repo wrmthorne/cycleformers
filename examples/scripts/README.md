@@ -1,0 +1,3 @@
+# Example Scripts
+
+A working example script for each supported paradigm is maintained here. These scripts are not exhaustive but are intended to be complete examples of how to use the library. Documentation for each training paradigm is available in the [docs](https://wrmthorne.github.io/CycleFormers/docs). For any issues, unexpected behaviour, or bugs, please open an issue on the [GitHub repository](https://github.com/wrmthorne/CycleFormers/issues).
