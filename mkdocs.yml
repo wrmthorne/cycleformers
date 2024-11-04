@@ -1,0 +1,19 @@
+site_name: CycleFormers
+site_url: https://wrmthorne.github.io/CycleFormers
+repo_name: wrmthorne/CycleFormers
+repo_url: https://github.com/wrmthorne/CycleFormers
+
+theme:
+  name: material
+  
+plugins:
+  - mkdocstrings
+
+nav:
+  - Get Started:
+    - Home: index.md
+    - Installation: installation.md
+    - Usage: usage.md
+  - Reference:
+    - CycleTrainer: reference/cycle_trainer.md
+    - MACCT: reference/macct.md

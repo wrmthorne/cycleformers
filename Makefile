@@ -9,7 +9,7 @@ PROJECT_VERSION ?= v$(shell poetry version -s)
 PYTHON_VERSION ?= 3.11
 .DEFAULT_GOAL := all
 
-.PHONY: init-env init check-toml lint-src format lint audit test all clean info
+.PHONY: init-env init check-toml lint-src format lint audit test all clean info build-docs
 
 init-env:
 	@if [ ! -f .env ]; then \
@@ -42,7 +42,11 @@ audit:
 test:
 	poetry run pytest $(TEST_DIR)
 
-all: format lint audit test
+build-docs:
+	poetry run mkdocs build
+	cp README.md docs/index.md
+
+all: format lint audit test build-docs
 
 clean:
 	rm -rf dist/
