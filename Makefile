@@ -44,7 +44,6 @@ test:
 
 build-docs:
 	poetry run mkdocs build
-	cp README.md docs/index.md
 
 all: format lint audit test build-docs
 
