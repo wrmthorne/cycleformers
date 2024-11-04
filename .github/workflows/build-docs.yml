@@ -1,0 +1,60 @@
+name: Build Documentation
+
+on:
+  workflow_call:
+
+jobs:
+  doctest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Poetry
+        run: |
+          pipx install poetry
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'poetry'
+      
+      - name: Install dependencies
+        run: poetry install
+      
+      - name: Run doctests
+        run: poetry run python -m doctest **/*.py
+
+  build-docs:
+    needs: doctest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Poetry
+        run: |
+          pipx install poetry
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'poetry'
+      
+      - name: Install dependencies
+        run: poetry install --only docs
+        shell: bash
+      
+      - name: Build & deploy documentation
+        run: |
+          poetry run mkdocs build --verbose --clean
+          poetry run mkdocs gh-deploy --force
+

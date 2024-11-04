@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "CycleFormers"
+name = "cycleformers"
 packages = [
-    { from = "src", include = "CycleFormers" },
+    { from = "src", include = "cycleformers" },
 ]
 version = "0.1.0"
 description = "A comprehensive implementation of the cycle-consistency training paradigm, extending the Huggingface Transformers trainer API to accommodate arbitrary combinations of generative models."

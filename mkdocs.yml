@@ -1,7 +1,7 @@
-site_name: CycleFormers
-site_url: https://wrmthorne.github.io/CycleFormers
-repo_name: wrmthorne/CycleFormers
-repo_url: https://github.com/wrmthorne/CycleFormers
+site_name: Cycleformers
+site_url: https://wrmthorne.github.io/cycleformers
+repo_name: wrmthorne/cycleformers
+repo_url: https://github.com/wrmthorne/cycleformers
 
 theme:
   name: material
