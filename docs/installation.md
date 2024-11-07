@@ -1,7 +1,7 @@
-CycleFormers is available on PyPi:
+Cycleformers is available on PyPi:
 
 ```bash
-pip install CycleFormers
+pip install cycleformers
 ```
 
 ## Development Setup
