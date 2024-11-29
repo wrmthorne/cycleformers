@@ -17,3 +17,4 @@ htmlcov/
 .vscode/
 .idea
 site/
+wandb/
