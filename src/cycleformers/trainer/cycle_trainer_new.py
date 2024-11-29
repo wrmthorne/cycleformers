@@ -1,7 +1,11 @@
 """Completely fresh attempt, based on the huggingface trainer but not using it for now"""
+import math
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorWithPadding, Trainer, DataCollatorForLanguageModeling
 from transformers.training_args import TrainingArguments
+from transformers.trainer_callback import TrainerState, TrainerControl, PrinterCallback, CallbackHandler, ExportableState
+from transformers.integrations import get_reporting_integration_callbacks
+from transformers.trainer_utils import TrainOutput
 from functools import wraps
 import inspect
 from datasets import load_from_disk, Dataset
@@ -11,13 +15,13 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import sys
-
 from transformers.trainer import DEFAULT_CALLBACKS, DEFAULT_PROGRESS_CALLBACK
 from transformers.training_args import TrainingArguments
 from functools import wraps
 import inspect
 
+# Need to implement CycleTrainerCallback class that inherits from TrainerCallback
+# Should handle both models A and B states
 
 def auto_temp_attributes(*attrs_to_cleanup):
     """
@@ -108,13 +112,7 @@ class CycleTrainer(Trainer):
         if data_collator_b is None:
             data_collator_b = DataCollatorWithPadding(self.tokenizer_b)
 
-        self.accelerator = Accelerator(log_with="wandb")
-        self.accelerator.init_trackers(
-            project_name="cycleformers",
-            config={},
-            init_kwargs={"wandb": {"name": "cycleformers"}}
-        
-        )
+
         self.train_dataset_a = train_dataset_a
         self.train_dataset_b = train_dataset_b
         self.eval_dataset_a = eval_dataset_a
@@ -122,17 +120,48 @@ class CycleTrainer(Trainer):
         self.data_collator_a = data_collator_a
         self.data_collator_b = data_collator_b
 
-        print("Creating Optimizers")
-        optimizer_a, lr_scheduler_a = self.create_optimizer_and_scheduler(model_a, len(train_dataset_a))
-        optimizer_b, lr_scheduler_b = self.create_optimizer_and_scheduler(model_b, len(train_dataset_b))
+        ## Calculate batches 
+        if not args.max_steps > 0:
+            num_update_steps_per_epoch = min(len(train_dataset_a), len(train_dataset_b)) // args.gradient_accumulation_steps
+            num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
+            args.max_steps = math.ceil(args.num_train_epochs * num_update_steps_per_epoch)
+        
+        accelerator = Accelerator()
+        self.accelerator = accelerator
+        args.local_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps
+        args.batch_size = args.local_batch_size
+        args.total_num_batches = math.ceil(args.max_steps / args.batch_size)
 
-        print("Preparing")
+        ## Setup model and dataloaders
+        optimizer_a, lr_scheduler_a = self.create_optimizer_and_scheduler(model_a, args.total_num_batches)
+        optimizer_b, lr_scheduler_b = self.create_optimizer_and_scheduler(model_b, args.total_num_batches)
+
         prepared = self.accelerator.prepare(
             model_a, optimizer_a, lr_scheduler_a, 
             model_b, optimizer_b, lr_scheduler_b
         )
         self.model_a, self.optimizer_a, self.lr_scheduler_a, self.model_b, \
             self.optimizer_b, self.lr_scheduler_b = prepared
+        
+        ## Trainer specific setup
+
+        # TODO: Major revision of control flow needed for any non-trivial runs
+        # Initialise callbacks and control flow - Current strategy is to just track one model
+        # under the assumption that most runs will be simple and edge cases can be handled later
+        default_callbacks = DEFAULT_CALLBACKS + get_reporting_integration_callbacks(self.args.report_to)
+        callbacks = default_callbacks if callbacks is None else default_callbacks + callbacks
+        self.callback_handler = CallbackHandler(
+            callbacks, self.model_a, self.tokenizer_a, self.optimizer_a, self.lr_scheduler_a
+        )
+        self.add_callback(PrinterCallback if self.args.disable_tqdm else DEFAULT_PROGRESS_CALLBACK)
+        self.control = TrainerControl()
+        self.state = TrainerState(
+            is_local_process_zero=self.is_local_process_zero(),
+            is_world_process_zero=self.is_world_process_zero(),
+            stateful_callbacks=[
+                cb for cb in self.callback_handler.callbacks + [self.control] if isinstance(cb, ExportableState)
+            ],
+        )
 
     def get_train_dataloader(self, dataset, data_collator):
         dataloader_params = {
@@ -154,19 +183,81 @@ class CycleTrainer(Trainer):
         return self.optimizer, self.lr_scheduler
 
     def train(self):
+        args = self.args
+        accelerator = self.accelerator
+        optimizer_a = self.optimizer_a
+        optimizer_b = self.optimizer_b
+        model_a = self.model_a
+        model_b = self.model_b
+        tokenizer_a = self.tokenizer_a
+        tokenizer_b = self.tokenizer_b
+        device = accelerator.device
+
         self.train_dataloader_a = self.get_train_dataloader(self.train_dataset_a, self.data_collator_a)
         self.train_dataloader_b = self.get_train_dataloader(self.train_dataset_b, self.data_collator_b)
-        total = min(len(self.train_dataloader_a), len(self.train_dataloader_b))
-        pbar = tqdm(total=total)
 
-        for idx, (batch_a, batch_b) in enumerate(zip(self.train_dataloader_a, self.train_dataloader_b)):
-            self._cycle_step(self.model_a, self.model_b, self.tokenizer_a, self.tokenizer_b, self.optimizer_a, batch_b, idx, cycle_name="A")
-            self._cycle_step(self.model_b, self.model_a, self.tokenizer_b, self.tokenizer_a, self.optimizer_b, batch_a, idx, cycle_name="B")
-            pbar.update(1)
+        # Trainer state initialisation
+        self.state.global_step = 0
+        self.state.epoch = 0
+        self.state.max_steps = args.max_steps
+        self.state.num_train_epochs = args.num_train_epochs
 
-            if idx % 50 == 0:
-                metrics = self.evaluate()
-                self.accelerator.log(metrics)
+        if args.logging_steps is not None:
+            if args.logging_steps < 1:
+                self.state.logging_steps = math.ceil(self.state.max_steps * args.logging_steps)
+            else:
+                self.state.logging_steps = args.logging_steps
+        if args.eval_steps is not None:
+            if args.eval_steps < 1:
+                self.state.eval_steps = math.ceil(self.state.max_steps * args.eval_steps)
+            else:
+                self.state.eval_steps = args.eval_steps
+        if args.save_steps is not None:
+            if args.save_steps < 1:
+                self.state.save_steps = math.ceil(self.state.max_steps * args.save_steps)
+            else:
+                self.state.save_steps = args.save_steps
+        self.control = self.callback_handler.on_train_begin(args, self.state, self.control)
+
+        if args.eval_on_start:
+            self.evaluate()
+
+        for epoch in range(self.state.epoch, args.num_train_epochs):
+            for idx, (batch_a, batch_b) in enumerate(zip(self.train_dataloader_a, self.train_dataloader_b)):
+                # Check if training should stop
+                if self.control.should_training_stop:
+                    break
+
+                # on_step_begin
+                self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
+
+                # Perform cycle steps
+                self._cycle_step(model_a, model_b, tokenizer_a, tokenizer_b, optimizer_a, batch_b, idx, cycle_name="A")
+                self._cycle_step(model_b, model_a, tokenizer_b, tokenizer_a, optimizer_b, batch_a, idx, cycle_name="B")
+
+                # Update state and check control flow
+                self.state.global_step += 1
+                self.control = self.callback_handler.on_step_end(args, self.state, self.control)
+
+                # Handle logging
+                if self.control.should_log:
+                    self.control = self.callback_handler.on_log(args, self.state, self.control)
+
+                # Handle evaluation
+                if self.control.should_evaluate:
+                    metrics = self.evaluate()
+                    self.control = self.callback_handler.on_evaluate(args, self.state, self.control, metrics)
+
+                # Handle saving
+                if self.control.should_save:
+                    self.control = self.callback_handler.on_save(args, self.state, self.control)
+
+            self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
+
+        # End of training
+        self.control = self.callback_handler.on_train_end(args, self.state, self.control)
+
+        return TrainOutput(self.state.global_step, 0.0, {})
 
     def _cycle_step(self, model_train, model_gen, tokenizer_train, tokenizer_gen, optimizer, batch, idx, cycle_name):
         model_gen.eval()
@@ -184,15 +275,18 @@ class CycleTrainer(Trainer):
         # Accelerator fails when handling alternating gradients
         outputs = model_train(**synth_batch, labels=batch["input_ids"])
         loss = outputs.loss / self.args.gradient_accumulation_steps
-        step_metrics[f"train_loss_{cycle_name}"] = loss
         self.accelerator.backward(loss)
 
         if (idx+1) % self.args.gradient_accumulation_steps == 0:
-            step_metrics[f"lr_{cycle_name}"] = optimizer.param_groups[0]["lr"]
+            self.state.log_history.append({
+                f"train_loss_{cycle_name}": loss.detach().float().item(),
+                f"learning_rate_{cycle_name}": optimizer.param_groups[0]["lr"],
+                "epoch": self.state.epoch,
+                "step": self.state.global_step,
+            })
             optimizer.step()
             optimizer.zero_grad()
 
-        self.accelerator.log(step_metrics)
     
 
     def evaluate(self, ignore_keys=None):
@@ -220,7 +314,6 @@ class CycleTrainer(Trainer):
         eval_dataloader_b = self.get_eval_dataloader(self.eval_dataset_b, self.data_collator_b)
         total_b = len(eval_dataloader_b)
 
-        artifacts = []
         for batch in tqdm(eval_dataloader_b, total=total_b, desc="Evaluating Model B"):
             with torch.no_grad():
                 outputs = self.model_b(**batch)
@@ -231,11 +324,14 @@ class CycleTrainer(Trainer):
 
         return metrics
 
-    
 def generate_model_samples(model, tokenizer, dataset, data_collator, num_samples=10):
     model.eval()
     samples = []
     for batch in tqdm(dataset, total=num_samples, desc="Generating samples"):
+        # Dataset already contains tokenized inputs
+        batch = data_collator([batch])
+        batch = {k: v.to(model.device) for k, v in batch.items()}
+        
         with torch.no_grad():
             outputs = model.generate(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], max_new_tokens=100)
             samples.extend(tokenizer.batch_decode(outputs, skip_special_tokens=True))

@@ -32,6 +32,15 @@ Cycleformers exposes a high-level but finely configurable API for transformer-ba
 ```
 A tested script using the intended API is given at [examples/scripts/macct.py](https://github.com/wrmthorne/cycleformers/tree/main/examples/scripts/macct.py).
 
+
+## Conceptual Clarifications
+
+WILL PROBABLY CHANGE
+
+There are some terms used throughout that may differ based on opinion. These are to explain how I have interpreted them:
+- `global_step` one call of the dataloaders i.e. (batch_a, batch_b) in zip(dataloader_a, dataloader_b).
+- `epoch` one full pass through the zipped dataloaders i.e. min(len(dataloader_a), len(dataloader_b)) calls of the dataloaders.
+
 ## Current Limitations
 
 While developing from this early version, there are some constraints imposed on the user while the library matures. The most notable is that Multi-Adapter Cycle-Consistency Training is the only supported mode of training as it was *shockingly* the easiest to implement and validate in a way that's almost (note upcoming caveats) compatible with the standard huggingface trainer.
