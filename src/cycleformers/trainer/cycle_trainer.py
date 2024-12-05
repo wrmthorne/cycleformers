@@ -182,6 +182,7 @@ class CycleTrainer(Trainer):
         checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
 
         self.hp_search_backend = None
+        self.current_flos = 0 # FIXME: Remember to remove this
         # TODO: Handle hyper-parameter searches?
         if self.hp_search_backend is None and trial is None:
             self.store_flos()
