@@ -36,7 +36,8 @@ Cycleformers exposes a high-level but finely configurable API for transformer-ba
 All throughout, api improvements, QoL improvements, and documentation improvements. Points 1-3 are required for a pre-release.
 
 Backlog:
-- Allow custom naming of each cycle through keys of dicts for models, tokenizers, etc.
+- Specific configuration for each model through cli args specified in dataclasses
+Allow custom naming of each cycle through keys of dicts for models, tokenizers, etc.
 - Rework of the current flow control classes as global state is currently hacked to only monitor model_A
 - Tokenizer-mapping for arbitrary model-to-model training ([github](https://github.com/explosion/tokenizations/blob/master/note/blog_post.md), [ArXiv](https://arxiv.org/html/2411.00593v1))
 - Investigation of potential tokenization issues e.g. not generating EOS tokens in training examples so will never learn to stop, separator token/whitespace for causal cycles

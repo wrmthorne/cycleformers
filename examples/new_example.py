@@ -25,9 +25,6 @@ def generate_model_samples(model, tokenizer, dataset, data_collator, num_samples
         print()
 
 
-# ==============================
-# This will all be removed after testing
-
 if __name__ == "__main__":
     dataset_en, dataset_de = load_from_disk("data/en"), load_from_disk("data/de")
 

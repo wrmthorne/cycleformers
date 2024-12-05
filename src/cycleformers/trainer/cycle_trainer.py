@@ -6,7 +6,7 @@ from transformers import DataCollatorForSeq2Seq, DataCollatorWithPadding, Traine
 from transformers.trainer_callback import TrainerState, TrainerControl, PrinterCallback, CallbackHandler, ExportableState
 from transformers.integrations import get_reporting_integration_callbacks
 from transformers.trainer_utils import TrainOutput
-from transformers.trainer import PREFIX_CHECKPOINT_DIR, TRAINER_STATE_NAME
+from transformers.trainer import PREFIX_CHECKPOINT_DIR, TRAINER_STATE_NAME, CONFIG_NAME, WEIGHTS_INDEX_NAME, WEIGHTS_NAME, SAFE_WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_NAME, FSDP_MODEL_NAME, ADAPTER_CONFIG_NAME, ADAPTER_SAFE_WEIGHTS_NAME, ADAPTER_WEIGHTS_NAME
 from accelerate import Accelerator
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -69,9 +69,11 @@ class CycleTrainer(Trainer):
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
                 model.generation_config.pad_token_id = tokenizer.eos_token_id
-                # TODO: Check whether seq2seq tokenizers care about padding side 
-                tokenizer.padding_side = "left" if not model.config.is_encoder_decoder else tokenizer.padding_side
 
+            # Causal "left" for generation, "right" for training. All sequences should be pretokenized
+            # therefore we pad to the right
+            # https://github.com/huggingface/transformers/issues/34842#issuecomment-2490994584
+            tokenizer.padding_side = "right"
         self.tokenizer_A = tokenizer_A
         self.tokenizer_B = tokenizer_B
 
@@ -156,6 +158,24 @@ class CycleTrainer(Trainer):
         }
         return self.accelerator.prepare(DataLoader(dataset, **dataloader_params))
     
+    
+    def _load_from_checkpoint(self, resume_from_checkpoint, model=None):
+        if model is None:
+            model = self.model
+
+        resume_from_checkpoint = Path(resume_from_checkpoint)
+
+        config_file = resume_from_checkpoint / CONFIG_NAME
+        adapter_weights_file = resume_from_checkpoint / ADAPTER_WEIGHTS_NAME
+        adapter_safe_weights_file = resume_from_checkpoint / ADAPTER_SAFE_WEIGHTS_NAME
+        weights_file = resume_from_checkpoint / WEIGHTS_NAME
+        weights_index_file = resume_from_checkpoint / WEIGHTS_INDEX_NAME
+        safe_weights_file = resume_from_checkpoint / SAFE_WEIGHTS_NAME
+        safe_weights_index_file = resume_from_checkpoint / SAFE_WEIGHTS_INDEX_NAME
+
+        # TODO 
+
+    
 
     def _save_checkpoint(self, model, trial=None, metrics=None):
         """Minor reimplementation of parent class method"""
@@ -212,14 +232,17 @@ class CycleTrainer(Trainer):
     def save_model(self, output_dir: str, model, _internal_call: bool = False):
         super().save_model(output_dir, _internal_call)
 
+
     @auto_temp_attributes('optimizer', 'lr_scheduler')
     def _save_optimizer_and_scheduler(self, output_dir: str, optimizer, lr_scheduler):
         super()._save_optimizer_and_scheduler(output_dir)
     
+
     @auto_temp_attributes('model', 'optimizer', 'lr_scheduler')
     def create_optimizer_and_scheduler(self, model, num_training_steps: int):
         super().create_optimizer_and_scheduler(num_training_steps=num_training_steps)
         return self.optimizer, self.lr_scheduler
+
 
     def train(self):
         args = self.args
@@ -398,8 +421,10 @@ class CycleTrainer(Trainer):
         if not model_train.config.is_encoder_decoder:
             input_texts = tokenizer_train.batch_decode(real_input_ids, skip_special_tokens=True)
             # TODO: Investigate tokenizer_train.eos_token as separator to appear more like packed training instances
-            synth_batch_text = [synth_text + " " + input_text for synth_text, input_text in zip(synth_batch_text, input_texts)] # FIXME: Work out how best to separate two sequences in causal
+            # TODO: Potentially add a configurable templating function here
+            synth_batch_text = [synth_text + "\n\n" + input_text for synth_text, input_text in zip(synth_batch_text, input_texts)]
 
+         
         synth_batch = tokenizer_train(synth_batch_text, return_tensors="pt", padding=True)
 
         # Everything up to -real_input_ids.shape[-1] is the prompt therefore -100

@@ -8,4 +8,10 @@ class CycleTrainingArguments(TrainingArguments):
     pass
 
 
-__all__ = ["CycleTrainingArguments"]
+@dataclass
+class ModelTrainingArguments:
+    """Will eventually contain model-specific arguments"""
+    pass
+
+
+__all__ = ["CycleTrainingArguments", "ModelTrainingArguments"]
