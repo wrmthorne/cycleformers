@@ -1,10 +1,12 @@
 import math
 import torch
+from pathlib import Path
 import torch.nn as nn
 from transformers import DataCollatorForSeq2Seq, DataCollatorWithPadding, Trainer, PreTrainedTokenizerBase
 from transformers.trainer_callback import TrainerState, TrainerControl, PrinterCallback, CallbackHandler, ExportableState
 from transformers.integrations import get_reporting_integration_callbacks
 from transformers.trainer_utils import TrainOutput
+from transformers.trainer import PREFIX_CHECKPOINT_DIR, TRAINER_STATE_NAME
 from accelerate import Accelerator
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -153,7 +155,67 @@ class CycleTrainer(Trainer):
             "collate_fn": data_collator
         }
         return self.accelerator.prepare(DataLoader(dataset, **dataloader_params))
+    
 
+    def _save_checkpoint(self, model, trial=None, metrics=None):
+        """Minor reimplementation of parent class method"""
+        checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
+
+        self.hp_search_backend = None
+        # TODO: Handle hyper-parameter searches?
+        if self.hp_search_backend is None and trial is None:
+            self.store_flos()
+
+        run_dir = self._get_output_dir(trial=trial)
+        output_dir = Path(run_dir) / checkpoint_folder
+
+        self.save_model(output_dir / "A", self.model_A, _internal_call=True)
+        self.save_model(output_dir / "B", self.model_B, _internal_call=True)
+
+        # Manually handle tokenizers
+        if self.tokenizer_A != self.tokenizer_B:
+            self.tokenizer_A.save_pretrained(output_dir / "A")
+            self.tokenizer_B.save_pretrained(output_dir / "B")
+        else:
+            self.tokenizer_A.save_pretrained(output_dir)
+
+        if not self.args.save_only_model:
+            self._save_optimizer_and_scheduler(output_dir / "A", self.optimizer_A, self.lr_scheduler_A)
+            self._save_optimizer_and_scheduler(output_dir / "B", self.optimizer_B, self.lr_scheduler_B)
+            self._save_rng_state(output_dir)
+
+        # TODO: Handle determination of best metrics and model checkpoint (for each model or across the cycle?)
+
+        if self.args.should_save:
+            for cb in [
+                cb for cb in self.callback_handler.callbacks + [self.control] if isinstance(cb, ExportableState)
+            ]:
+                cb_name = cb.__class__.__name__
+                cb_state = cb.state()
+                if isinstance(self.state.stateful_callbacks[cb_name], list):
+                    self.state.stateful_callbacks[cb_name].append(cb_state)
+                else:
+                    self.state.stateful_callbacks[cb_name] = cb_state
+            self.state.save_to_json(output_dir / TRAINER_STATE_NAME)
+
+        if self.args.push_to_hub:
+            self._push_from_checkpoint(output_dir)
+
+        # Maybe delete some older checkpoints.
+        if self.args.should_save:
+            # Solely rely on numerical checkpoint id for rotation.
+            # mtime is not reliable especially on some fuse fs in cloud environments.
+            self._rotate_checkpoints(use_mtime=False, output_dir=run_dir)
+
+
+    @auto_temp_attributes('model', 'processing_class')
+    def save_model(self, output_dir: str, model, _internal_call: bool = False):
+        super().save_model(output_dir, _internal_call)
+
+    @auto_temp_attributes('optimizer', 'lr_scheduler')
+    def _save_optimizer_and_scheduler(self, output_dir: str, optimizer, lr_scheduler):
+        super()._save_optimizer_and_scheduler(output_dir)
+    
     @auto_temp_attributes('model', 'optimizer', 'lr_scheduler')
     def create_optimizer_and_scheduler(self, model, num_training_steps: int):
         super().create_optimizer_and_scheduler(num_training_steps=num_training_steps)

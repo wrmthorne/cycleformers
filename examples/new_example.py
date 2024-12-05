@@ -68,16 +68,18 @@ if __name__ == "__main__":
         logging_steps=1,
         logging_strategy="steps",
         learning_rate=3e-4,
+        save_steps=1,
+        evaluation_strategy="no",
     )
 
     trainer = CycleTrainer(
         args,
         models=model_A,
         tokenizers=tokenizer,
-        train_dataset_A=dataset_en['train'],
-        train_dataset_B=dataset_de['train'],
-        eval_dataset_A=dataset_en['test'],
-        eval_dataset_B=dataset_de['test']
+        train_dataset_A=dataset_en['train'].select(range(2)),
+        train_dataset_B=dataset_de['train'].select(range(2)),
+        # eval_dataset_A=dataset_en['test'],
+        # eval_dataset_B=dataset_de['test']
     )
     trainer.train()
 

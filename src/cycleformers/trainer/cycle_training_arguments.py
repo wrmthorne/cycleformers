@@ -6,3 +6,6 @@ from transformers.training_args import TrainingArguments
 class CycleTrainingArguments(TrainingArguments):
     """Will eventually contain cycle-specific arguments"""
     pass
+
+
+__all__ = ["CycleTrainingArguments"]

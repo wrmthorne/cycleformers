@@ -2,11 +2,10 @@ from dataclasses import dataclass
 
 import pytest
 from peft import LoraConfig
+from datasets import Dataset
+from peft import get_peft_model
 from torch.optim import AdamW
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, AutoModelForCausalLM
-
-from cycleformers.models.peft_models import CycleAdapterConfig, PeftCycleModelForSeq2SeqLM
-
 
 def pytest_addoption(parser):
     parser.addoption("--slow", action="store_true", help="Run slow tests")
@@ -31,12 +30,12 @@ def pytest_collection_modifyitems(config, items):
 # TODO: add config tests for other architectures
 @dataclass
 class Seq2SeqModelTestConfig:
-    base_model_name: str = "google/t5-efficient-tiny"
+    model_name_or_path: str = "google/t5-efficient-tiny"
 
 
 @dataclass
 class CausalModelTestConfig:
-    base_model_name: str = "trl-internal-testing/tiny-LlamaForCausalLM-3.1" # TODO: Make own tiny models
+    model_name_or_path: str = "trl-internal-testing/tiny-LlamaForCausalLM-3.1" # TODO: Make own tiny models
 
 
 @pytest.fixture(name="lora_config")
@@ -46,7 +45,6 @@ def fixture_lora_config(request):
         task_type=task_type,
         r=8,
         lora_alpha=32,
-        target_modules=("q", "v"),
     )
 
 
@@ -65,38 +63,40 @@ def fixture_text() -> str:
     return "This is a test input"
 
 
-@pytest.fixture(name="seq2seq_base_model")
-def fixture_seq2seq_base_model(seq2seq_config):
-    return AutoModelForSeq2SeqLM.from_pretrained(seq2seq_config.base_model_name)
+@pytest.fixture(name="seq2seq_model")
+def fixture_seq2seq_model(seq2seq_config):
+    return AutoModelForSeq2SeqLM.from_pretrained(seq2seq_config.model_name_or_path)
 
 
-@pytest.fixture(name="causal_base_model")
-def fixture_causal_base_model(causal_config):
-    return AutoModelForCausalLM.from_pretrained(causal_config.base_model_name)
+@pytest.fixture(name="causal_model")
+def fixture_causal_model(causal_config):
+    return AutoModelForCausalLM.from_pretrained(causal_config.model_name_or_path)
+
+
+@pytest.fixture(name="peft_causal_model")
+@pytest.mark.parametrize("lora_config", ["CAUSAL_LM"], indirect=True)
+def fixture_peft_causal_model(causal_model, lora_config):
+    model = get_peft_model(causal_model, lora_config, adapter_name="A")
+    model.add_adapter("B", lora_config)
+    return model
 
 
 @pytest.fixture(name="seq2seq_tokenizer")
 def fixture_seq2seq_tokenizer(seq2seq_config):
-    return AutoTokenizer.from_pretrained(seq2seq_config.base_model_name)
+    return AutoTokenizer.from_pretrained(seq2seq_config.model_name_or_path)
 
 
 @pytest.fixture(name="causal_tokenizer")
 def fixture_causal_tokenizer(causal_config):
-    tokenizer = AutoTokenizer.from_pretrained(causal_config.base_model_name)
+    tokenizer = AutoTokenizer.from_pretrained(causal_config.model_name_or_path)
     tokenizer.pad_token_id = tokenizer.eos_token_id
     tokenizer.padding_side = "left"
     return tokenizer
 
 
-@pytest.fixture(name="seq2seq_model")
-def fixture_seq2seq_model(seq2seq_base_model, seq2seq_tokenizer, lora_config):
-    adapter_a_config = CycleAdapterConfig(adapter_name="adapter_a", peft_config=lora_config)
-    adapter_b_config = CycleAdapterConfig(adapter_name="adapter_b", peft_config=lora_config)
-
-    base_model = PeftCycleModelForSeq2SeqLM(
-        model=seq2seq_base_model, tokenizer=seq2seq_tokenizer, adapter_configs=[adapter_a_config, adapter_b_config]
-    )
-    return base_model
+@pytest.fixture(name="optimizer")
+def fixture_optimizer():
+    return AdamW
 
 
 @pytest.fixture(name="seq2seq_inputs")
@@ -104,6 +104,25 @@ def fixture_seq2seq_inputs(text, seq2seq_tokenizer):
     return seq2seq_tokenizer(text, return_tensors="pt")
 
 
-@pytest.fixture(name="optimizer")
-def fixture_optimizer():
-    return AdamW
+@pytest.fixture(name="text_dataset")
+def fixture_text_dataset():
+    text = [
+        "This is a test input",
+        "This is another test input",
+        "This is a third and final test input"
+    ]
+    labels = [
+        "This is an acknowledgement",
+        "This is another acknowledgement",
+        "This is a third and final acknowledgement"
+    ]
+    return Dataset.from_dict({"text": text, "labels": labels})
+
+
+@pytest.fixture(name="tokenized_dataset")
+def fixture_tokenized_dataset(causal_tokenizer, text_dataset):
+    dataset = text_dataset.map(lambda x: {
+        **causal_tokenizer(x["text"], return_tensors="pt"),
+        "labels": causal_tokenizer(x["labels"], return_tensors="pt")['input_ids']
+    }).remove_columns(["text"])
+    return dataset
