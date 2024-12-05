@@ -57,8 +57,14 @@ class CycleTrainer(Trainer):
         
         # Extract tokenizers from input
         if isinstance(tokenizers, dict):
-            tokenizer_A = tokenizers["A"] 
-            tokenizer_B = tokenizers["B"]
+            if tokenizers.keys() != {'A', 'B'}:
+                raise ValueError(f"Got unexpected tokenizer keys: {tokenizers.keys()}")
+            
+            if tokenizers["A"] == tokenizers["B"]:
+                tokenizer_A = tokenizer_B = tokenizers["A"] # TODO: Find equality function for tokenizers
+            else:
+                tokenizer_A = tokenizers["A"] 
+                tokenizer_B = tokenizers["B"]
         elif isinstance(tokenizers, PreTrainedTokenizerBase):
             tokenizer_A = tokenizer_B = tokenizers
         else:
@@ -158,30 +164,15 @@ class CycleTrainer(Trainer):
         }
         return self.accelerator.prepare(DataLoader(dataset, **dataloader_params))
     
-    
-    def _load_from_checkpoint(self, resume_from_checkpoint, model=None):
-        if model is None:
-            model = self.model
-
-        resume_from_checkpoint = Path(resume_from_checkpoint)
-
-        config_file = resume_from_checkpoint / CONFIG_NAME
-        adapter_weights_file = resume_from_checkpoint / ADAPTER_WEIGHTS_NAME
-        adapter_safe_weights_file = resume_from_checkpoint / ADAPTER_SAFE_WEIGHTS_NAME
-        weights_file = resume_from_checkpoint / WEIGHTS_NAME
-        weights_index_file = resume_from_checkpoint / WEIGHTS_INDEX_NAME
-        safe_weights_file = resume_from_checkpoint / SAFE_WEIGHTS_NAME
-        safe_weights_index_file = resume_from_checkpoint / SAFE_WEIGHTS_INDEX_NAME
-
-        # TODO 
-
-    
 
     def _save_checkpoint(self, model, trial=None, metrics=None):
         """Minor reimplementation of parent class method"""
         checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
 
+        # Creating class variables needed to hack the trainer into saving for now
         self.hp_search_backend = None
+        self.is_fsdp_enabled = False
+        self.is_deepspeed_enabled = False
         self.current_flos = 0 # FIXME: Remember to remove this
         # TODO: Handle hyper-parameter searches?
         if self.hp_search_backend is None and trial is None:
@@ -190,8 +181,11 @@ class CycleTrainer(Trainer):
         run_dir = self._get_output_dir(trial=trial)
         output_dir = Path(run_dir) / checkpoint_folder
 
-        self.save_model(output_dir / "A", self.model_A, _internal_call=True)
-        self.save_model(output_dir / "B", self.model_B, _internal_call=True)
+        if self.is_peft_model:
+            self.save_model(output_dir, self.model_A, _internal_call=True)
+        else:
+            self.save_model(output_dir / "A", self.model_A, _internal_call=True)
+            self.save_model(output_dir / "B", self.model_B, _internal_call=True)
 
         # Manually handle tokenizers
         if self.tokenizer_A != self.tokenizer_B:
