@@ -25,6 +25,17 @@ Cycleformers exposes a high-level but finely configurable API for transformer-ba
 - 🛠️ Flexible and extensible design
 <!-- - 📝 Comprehensive documentation and examples -->
 
+## In Progress - in order of priority
+
+1) Causal-to-Causal cycle implementation
+2) Adding peft into the main trainer rather than using a more complicated trainer thats too bespoke
+3) Saving and loading from checkpoints
+4) arbitrary model-to-model training (mixed architectures, model families, etc.)
+5) Improved evaluation metrics
+
+All throughout, api improvements, QoL improvements, and documentation improvements. Points 1-3 are required for a pre-release.
+
+
 ## Multi-Adapter Cycle-Consistency Training (MACCT)
 
 ```python
