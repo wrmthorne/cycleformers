@@ -170,7 +170,6 @@ class CycleTrainer(Trainer):
         model_B = self.model_B
         tokenizer_A = self.tokenizer_A
         tokenizer_B = self.tokenizer_B
-        device = accelerator.device
 
         self.train_dataloader_A = self.get_train_dataloader(self.train_dataset_A, self.data_collator_A)
         self.train_dataloader_B = self.get_train_dataloader(self.train_dataset_B, self.data_collator_B)

@@ -1,5 +1,5 @@
-from .macct_cycle_trainer_deprecated import CycleTrainer
-from .macct_config import MACCTConfig
+from .cycle_trainer import CycleTrainer
+from .cycle_training_arguments import CycleTrainingArguments
 
 
-__all__ = ["CycleTrainer", "MACCTConfig"]
+__all__ = ["CycleTrainer", "CycleTrainingArguments"]

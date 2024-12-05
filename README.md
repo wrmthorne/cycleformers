@@ -15,7 +15,7 @@
 
 Cycleformers exposes a high-level but finely configurable API for transformer-based cycle-consistent architectures. The primary objective of the library is to provide a very simple framework to start using that works, out-of-the-box on as wide a range of hardware configurations as possible. This will enable quick iteration in training and research. The priority of flexibility is not limited to hardware - we aim to offer an interface that enforces no restrictions on the data, models (or number thereof), and enable immediate access to the latest versions of the Huggingface ecosystem. The fragmentation of training scripts for cycle-consistency across different domains, backend packages, and hardware selections has required frequent reimplementaion of the same idea to resolve implementation level details when the goal is to investigate the applications of the paradigm.
 
-`NOTE:` The current pre-release build only supports Multi-Adapter Cycle-Consistency Training (MACCT) while general model-to-model training is implemented. All existing APIs are subject to change.
+`NOTE:` All existing APIs are subject to change without notice.
 
 ## Features
 
@@ -23,18 +23,52 @@ Cycleformers exposes a high-level but finely configurable API for transformer-ba
 - 🔄 Cycle-consistent architecture
 - 📊 A pure extension of the Huggingface ecosystem
 - 🛠️ Flexible and extensible design
-<!-- - 📝 Comprehensive documentation and examples -->
+- 📝 Comprehensive documentation and examples
 
-## In Progress - in order of priority
+## In Progress (Ordered by Priority)
 
-1) Causal-to-Causal cycle implementation
-2) Adding peft into the main trainer rather than using a more complicated trainer thats too bespoke
-3) Saving and loading from checkpoints
-4) arbitrary model-to-model training (mixed architectures, model families, etc.)
-5) Improved evaluation metrics
+- ✅ Causal-to-Causal cycle implementation
+- ✅ Adding peft into the main trainer rather than using a more complicated trainer thats too bespoke
+- 🚧 Saving and loading from checkpoints
+- 🚧 arbitrary model-to-model training (mixed architectures, model families, etc.)
+- 🚧 Improved evaluation metrics
 
 All throughout, api improvements, QoL improvements, and documentation improvements. Points 1-3 are required for a pre-release.
 
+Backlog:
+- Allow custom naming of each cycle through keys of dicts for models, tokenizers, etc.
+- Rework of the current flow control classes as global state is currently hacked to only monitor model_A
+- Tokenizer-mapping for arbitrary model-to-model training ([github](https://github.com/explosion/tokenizations/blob/master/note/blog_post.md), [ArXiv](https://arxiv.org/html/2411.00593v1))
+- Investigation of potential tokenization issues e.g. not generating EOS tokens in training examples so will never learn to stop, separator token/whitespace for causal cycles
+- Handling very different batch sizes for each model in the cycle. May happen that the batch size output from one model is too big to pass in one generate/train call. Need to batch the output of one model to be used as input to the next.
+
+## CycleTrainer
+
+```python
+from cycleformers import CycleTrainer, CycleTrainingArguments
+
+# Arbitrary combinations of generative models
+model_A = AutoModelForCausalLM.from_pretrained("gpt2")
+model_B = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
+
+...
+
+args = CycleTrainingArguments()
+trainer = CycleTrainer(
+    args, 
+    models = {
+        "A": model_A,
+        "B": model_B
+    }
+    tokenizers = {
+        "A": tokenizer_A,
+        "B": tokenizer_B
+    },
+    train_dataset_A = train_dataset_A,
+    train_dataset_B = train_dataset_B
+)
+trainer.train()
+```
 
 ## Multi-Adapter Cycle-Consistency Training (MACCT)
 

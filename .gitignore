@@ -18,3 +18,4 @@ htmlcov/
 .idea
 site/
 wandb/
+data/
