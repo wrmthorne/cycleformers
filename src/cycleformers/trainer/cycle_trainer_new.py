@@ -1,7 +1,7 @@
 """Completely fresh attempt, based on the huggingface trainer but not using it for now"""
 import math
 import torch
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorWithPadding, Trainer, DataCollatorForLanguageModeling
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorWithPadding, Trainer, AutoModelForCausalLM
 from transformers.training_args import TrainingArguments
 from transformers.trainer_callback import TrainerState, TrainerControl, PrinterCallback, CallbackHandler, ExportableState
 from transformers.integrations import get_reporting_integration_callbacks
@@ -88,7 +88,7 @@ class CycleStepParams:
 class CycleTrainer(Trainer):
     def __init__(
             self,
-            args,
+            args: CycleTrainingArguments,
             model_a = None,
             model_b = None,
             tokenizer_a = None,
@@ -102,23 +102,37 @@ class CycleTrainer(Trainer):
             callbacks = None
         ):       
         self.args = args
+
+        # TODO: Check whether seq2seq tokenizers care about padding side
+        if tokenizer_a.pad_token is None:
+            tokenizer_a.pad_token = tokenizer_a.eos_token
+            model_a.generation_config.pad_token_id = tokenizer_a.eos_token_id
+            tokenizer_a.padding_side = "left" if not model_a.config.is_encoder_decoder else tokenizer_a.padding_side
+        if tokenizer_b.pad_token is None:
+            tokenizer_b.pad_token = tokenizer_b.eos_token
+            model_b.generation_config.pad_token_id = tokenizer_b.eos_token_id
+            tokenizer_b.padding_side = "left" if not model_b.config.is_encoder_decoder else tokenizer_b.padding_side
+
         self.tokenizer_a = tokenizer_a
         self.tokenizer_b = tokenizer_b
+
         self.model_a = model_a
         self.model_b = model_b
 
-        if data_collator_a is None:
-            data_collator_a = DataCollatorWithPadding(self.tokenizer_a)
-        if data_collator_b is None:
-            data_collator_b = DataCollatorWithPadding(self.tokenizer_b)
+        if data_collator_a is None and model_a.config.is_encoder_decoder:
+            self.data_collator_a = DataCollatorForSeq2Seq(tokenizer_a)
+        elif data_collator_a is None:
+            self.data_collator_a = DataCollatorWithPadding(tokenizer_a)
 
+        if data_collator_b is None and model_b.config.is_encoder_decoder:
+            self.data_collator_b = DataCollatorForSeq2Seq(tokenizer_b)
+        elif data_collator_b is None:
+            self.data_collator_b = DataCollatorWithPadding(tokenizer_b)
 
         self.train_dataset_a = train_dataset_a
         self.train_dataset_b = train_dataset_b
         self.eval_dataset_a = eval_dataset_a
         self.eval_dataset_b = eval_dataset_b
-        self.data_collator_a = data_collator_a
-        self.data_collator_b = data_collator_b
 
         ## Calculate batches 
         if not args.max_steps > 0:
@@ -232,8 +246,8 @@ class CycleTrainer(Trainer):
                 self.control = self.callback_handler.on_step_begin(args, self.state, self.control)
 
                 # Perform cycle steps
-                self._cycle_step(model_a, model_b, tokenizer_a, tokenizer_b, optimizer_a, batch_b, idx, cycle_name="A")
-                self._cycle_step(model_b, model_a, tokenizer_b, tokenizer_a, optimizer_b, batch_a, idx, cycle_name="B")
+                metrics_a = self._cycle_step(model_a, model_b, tokenizer_a, tokenizer_b, optimizer_a, batch_b, idx, cycle_name="A")
+                metrics_b = self._cycle_step(model_b, model_a, tokenizer_b, tokenizer_a, optimizer_b, batch_a, idx, cycle_name="B")
 
                 # Update state and check control flow
                 self.state.global_step += 1
@@ -241,7 +255,8 @@ class CycleTrainer(Trainer):
 
                 # Handle logging
                 if self.control.should_log:
-                    self.control = self.callback_handler.on_log(args, self.state, self.control)
+                    metrics = {**metrics_a, **metrics_b}
+                    self.control = self.callback_handler.on_log(args, self.state, self.control, metrics)
 
                 # Handle evaluation
                 if self.control.should_evaluate:
@@ -260,33 +275,61 @@ class CycleTrainer(Trainer):
         return TrainOutput(self.state.global_step, 0.0, {})
 
     def _cycle_step(self, model_train, model_gen, tokenizer_train, tokenizer_gen, optimizer, batch, idx, cycle_name):
+        """
+        Perform a single cycle step        
+        """
         model_gen.eval()
         model_train.train()
+        metrics = {}
 
-        step_metrics = {}
+        with torch.inference_mode():
+            # TODO: Add generation config
+            synth_batch_ids = model_gen.generate(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], max_new_tokens=100)
 
-        with torch.no_grad():   
-            synth_batch = model_gen.generate(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], max_new_tokens=100)
-
-        # Clean up output for model b - Can be made much more efficient
-        synth_batch = tokenizer_gen.batch_decode(synth_batch, skip_special_tokens=True)
-        synth_batch = {k: v.to(self.accelerator.device) for k, v in tokenizer_train(synth_batch, return_tensors="pt", padding=True).items()}        
+        synth_batch = self._cycle_prepare_inputs(batch["input_ids"], synth_batch_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name)
+        synth_batch = {k: v.to(self.accelerator.device) for k, v in synth_batch.items()}        
 
         # Accelerator fails when handling alternating gradients
-        outputs = model_train(**synth_batch, labels=batch["input_ids"])
+        outputs = model_train(**synth_batch)
         loss = outputs.loss / self.args.gradient_accumulation_steps
         self.accelerator.backward(loss)
 
         if (idx+1) % self.args.gradient_accumulation_steps == 0:
-            self.state.log_history.append({
-                f"train_loss_{cycle_name}": loss.detach().float().item(),
-                f"learning_rate_{cycle_name}": optimizer.param_groups[0]["lr"],
-                "epoch": self.state.epoch,
-                "step": self.state.global_step,
-            })
+            metrics[f"train_loss_{cycle_name}"] = loss.detach().float().item()
+            metrics[f"learning_rate_{cycle_name}"] = optimizer.param_groups[0]["lr"]
             optimizer.step()
             optimizer.zero_grad()
 
+        # Free up memory
+        del synth_batch
+
+        return metrics
+
+    def _cycle_prepare_inputs(self, real_input_ids, synth_input_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name):
+        """Scenarios that need testing:
+        1) Order of inputs is correct
+        2) No inputs have been truncated in any way
+        3) -100 is set for everything except the real_input_ids
+        4) Attention mask correctly accounts for padding
+        """
+        if not model_gen.config.is_encoder_decoder:
+            synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1]:]
+
+        # TODO: Skip retokenization if tokenizers are identical
+        synth_batch_text = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
+
+        if not model_train.config.is_encoder_decoder:
+            input_texts = tokenizer_train.batch_decode(real_input_ids, skip_special_tokens=True)
+            # TODO: Investigate tokenizer_train.eos_token as separator to appear more like packed training instances
+            synth_batch_text = [synth_text + " " + input_text for synth_text, input_text in zip(synth_batch_text, input_texts)] # FIXME: Work out how best to separate two sequences in causal
+
+        synth_batch = tokenizer_train(synth_batch_text, return_tensors="pt", padding=True)
+
+        # Everything up to -real_input_ids.shape[-1] is the prompt therefore -100
+        synth_batch['labels'] = synth_batch["input_ids"].clone()
+        synth_batch['labels'][:, :-real_input_ids.shape[-1]] = -100 # TODO: Make sure this doesn't include leasing whitespace
+
+        return synth_batch
     
 
     def evaluate(self, ignore_keys=None):
@@ -350,22 +393,33 @@ if __name__ == "__main__":
     from transformers import DataCollatorForSeq2Seq
     dataset_en, dataset_de = load_from_disk("data/en"), load_from_disk("data/de")
 
-    model_a = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small")
-    model_b = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small")
-    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small", padding=True)
+    # MODEL_NAME = "google/flan-t5-small"
+    # model_a = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+    # model_b = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+
+    MODEL_NAME = "meta-llama/Llama-3.2-1B"
+    model_a = AutoModelForCausalLM.from_pretrained(MODEL_NAME, device_map="auto", torch_dtype=torch.bfloat16)
+    model_b = AutoModelForCausalLM.from_pretrained(MODEL_NAME, device_map="auto", torch_dtype=torch.bfloat16)
+
+    print('='*60)
+    print(model_a.config.is_encoder_decoder)
+    print(model_b.config.is_encoder_decoder)
+    print('='*60)
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, padding=True)
 
     args = CycleTrainingArguments(
         output_dir="outputs",
-        per_device_train_batch_size=16,
-        per_device_eval_batch_size=16,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
         gradient_accumulation_steps=1,
         num_train_epochs=1,
+        logging_steps=1,
+        logging_strategy="steps",
     )
 
-    data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, pad_to_multiple_of=8)
-
     trainer = CycleTrainer(
-        args=args,
+        args,
         model_a=model_a,
         model_b=model_b,
         tokenizer_a=tokenizer,
@@ -373,9 +427,7 @@ if __name__ == "__main__":
         train_dataset_a=dataset_en['train'],
         train_dataset_b=dataset_de['train'],
         eval_dataset_a=dataset_en['test'],
-        eval_dataset_b=dataset_de['test'],
-        data_collator_a=data_collator,
-        data_collator_b=data_collator,
+        eval_dataset_b=dataset_de['test']
     )
     trainer.train()
 
