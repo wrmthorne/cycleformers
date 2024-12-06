@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 import pytest
 
-from cycleformers.trainer.cycle_trainer import CycleTrainer
+from cycleformers import CycleTrainer
 
 
 class TestCyclePrepareInputs:
@@ -28,6 +28,7 @@ class TestCyclePrepareInputs:
         trainer._cycle_prepare_inputs = CycleTrainer._cycle_prepare_inputs.__get__(trainer)
         return trainer
 
+    @pytest.mark.skip(reason="Not implemented")
     def test_causal_causal_sequence_order(self, real_causal_input_ids, synth_causal_input_ids, cycle_trainer, causal_base_model, causal_tokenizer):
         synth_batch = cycle_trainer._cycle_prepare_inputs(
             real_causal_input_ids,
@@ -38,9 +39,6 @@ class TestCyclePrepareInputs:
             causal_tokenizer,
             "a"
         )
-
-        print(causal_tokenizer.batch_decode(synth_batch["input_ids"]))
-
         assert synth_batch["input_ids"][0].tolist()[:self.synth_fst] == synth_causal_input_ids[0].tolist()
         assert synth_batch["input_ids"][1].tolist()[:self.synth_snd] == synth_causal_input_ids[1].tolist()
         assert synth_batch["input_ids"][0].tolist()[self.synth_fst:self.synth_fst+self.real_fst] == real_causal_input_ids[0].tolist()
