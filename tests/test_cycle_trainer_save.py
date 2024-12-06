@@ -4,7 +4,7 @@ import pytest
 import torch
 import json
 from pathlib import Path
-from cycleformers.trainer import CycleTrainer, CycleTrainingArguments
+from cycleformers import CycleTrainer, CycleTrainingArguments
 
 class TestSaveCheckpoint:
     @pytest.fixture(autouse=True)

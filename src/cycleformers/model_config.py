@@ -1,4 +1,3 @@
-#%%
 from dataclasses import dataclass
 from typing import Literal
 
@@ -66,15 +65,7 @@ class ModelConfig:
     lora_task_type: str = "CAUSAL_LM"
     use_rslora: bool = False
     use_dora: bool = False
-    load_in_8bit: bool = False
-    load_in_4bit: bool = False
-    bnb_4bit_quant_type: Literal["fp4", "nf4"] = "nf4"
-    use_bnb_nested_quant: bool = False
-
-
-#%%
-
-
-
-# Create a new variant
-ModelConfigA = suffix_dataclass_factory(ModelConfig, '_A')
+    # load_in_8bit: bool = False
+    # load_in_4bit: bool = False
+    # bnb_4bit_quant_type: Literal["fp4", "nf4"] = "nf4"
+    # use_bnb_nested_quant: bool = False

@@ -1,10 +1,14 @@
-from functools import wraps
 import inspect
-from dataclasses import dataclass, fields, make_dataclass, field
-from typing import get_type_hints, Any
+from dataclasses import field, fields, make_dataclass
+from functools import wraps
+from typing import Any, get_type_hints
+
+from peft import LoraConfig
+
+from .types import DataclassProtocol
 
 
-def suffix_dataclass_factory(base_class: dataclass, suffix: str = '_A') -> dataclass:
+def suffix_dataclass_factory(base_class: DataclassProtocol, suffix: str = '_A') -> DataclassProtocol:
     """
     Creates a new dataclass by appending a suffix to the base class name and all its fields.
 
@@ -17,7 +21,7 @@ def suffix_dataclass_factory(base_class: dataclass, suffix: str = '_A') -> datac
     """
     if not hasattr(base_class, '__dataclass_fields__'):
         raise TypeError("Base class must be a dataclass")
-    
+
     original_fields = fields(base_class)
     type_hints = get_type_hints(base_class)
 
@@ -25,23 +29,25 @@ def suffix_dataclass_factory(base_class: dataclass, suffix: str = '_A') -> datac
     for og_field in original_fields:
         field_type = type_hints.get(og_field.name, Any)
         new_field_name = og_field.name + suffix
-        
+
         # Preserve metadata
         field_kwargs = {
-            'init': og_field.init,
-            'repr': og_field.repr,
-            'compare': og_field.compare,
-            'metadata': og_field.metadata,
+            'init': bool(og_field.init),
+            'repr': bool(og_field.repr),
+            'compare': bool(og_field.compare),
+            'metadata': dict(og_field.metadata or {}),
         }
-        
+
         # Handle default values
         if og_field.default is not og_field.default_factory:
             field_kwargs['default'] = og_field.default
-        if og_field.default_factory is not og_field.default_factory:
+        if og_field.default is not og_field.default_factory:
+            field_kwargs['default'] = og_field.default
+        if og_field.default_factory is not og_field.default_factory.__class__:  # Changed this line
             field_kwargs['default_factory'] = og_field.default_factory
-            
+
         new_fields.append((new_field_name, field_type, field(**field_kwargs)))
-    
+
     # Create new dataclass without inheriting from base class
     new_class_name = base_class.__name__ + suffix.replace('_', '')
     new_class = make_dataclass(
@@ -67,12 +73,12 @@ def auto_temp_attributes(*attrs_to_cleanup):
             for attr in attrs_to_cleanup:
                 if hasattr(self, attr):
                     original_values[attr] = getattr(self, attr)
-            
+
             # Get function signature to match positional args to parameter names
             sig = inspect.signature(func)
             bound_args = sig.bind(self, *args, **kwargs)
             bound_args.apply_defaults()
-            
+
             # Set attributes based on parameters
             for attr in attrs_to_cleanup:
                 # Skip 'self' parameter
@@ -80,7 +86,7 @@ def auto_temp_attributes(*attrs_to_cleanup):
                     setattr(self, attr, bound_args.arguments[attr])
                 else:
                     setattr(self, attr, None)
-            
+
             try:
                 # Execute the method
                 result = func(self, *args, **kwargs)
@@ -97,3 +103,22 @@ def auto_temp_attributes(*attrs_to_cleanup):
                             pass
         return wrapper
     return decorator
+
+
+def get_peft_config(model_config):
+    """Helper function to return a PEFT config from a model config dataclass."""
+    if model_config.use_peft is False:
+        return None
+
+    peft_config = LoraConfig(
+        task_type=model_config.lora_task_type,
+        r=model_config.lora_r,
+        target_modules=model_config.lora_target_modules,
+        lora_alpha=model_config.lora_alpha,
+        lora_dropout=model_config.lora_dropout,
+        bias="none",
+        use_rslora=model_config.use_rslora,
+        modules_to_save=model_config.lora_modules_to_save,
+    )
+
+    return peft_config
