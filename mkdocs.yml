@@ -5,15 +5,66 @@ repo_url: https://github.com/wrmthorne/cycleformers
 
 theme:
   name: material
-  
-plugins:
-  - mkdocstrings
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      scheme: default
+      primary: black
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+  features:
+    - navigation.top
+    - navigation.tabs
+    - navigation.path
+    - navigation.footer
+    - navigation.instant
+    - navigation.sections
+    - navigation.tracking
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - content.code.annotate
+    - content.code.copy
 
 nav:
   - Get Started:
-    - Home: index.md
+    - Cycleformers: index.md
     - Installation: installation.md
     - Usage: usage.md
-  - Reference:
-    - CycleTrainer: reference/cycle_trainer.md
-    - MACCT: reference/macct.md
+    - Performance: performance.md
+  - Conceptual Reference:
+    - Conceptual Overview: conceptual_reference/index.md
+    - Cycle-Consistency Training: conceptual_reference/cycle_consistency_training.md
+    - MACCT: conceptual_reference/macct.md
+  - Examples:
+    - Examples: examples/index.md
+  - API Reference:
+    - CycleTrainer: api_reference/cycle_trainer.md
+    - Configuration: api_reference/configuration.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.superfences
+
+plugins:
+  - mkdocstrings

@@ -18,4 +18,5 @@ htmlcov/
 .idea
 site/
 wandb/
-data/
+examples/**/data/
+misc/

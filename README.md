@@ -15,7 +15,7 @@
 
 Cycleformers is a Python library that simplifies the implementation of transformer-based cycle-consistency training. It offers a high-level API that is easy to use and configure, enabling researchers and developers to quickly start training and experimenting across a wide range of hardware configurations. Both causal and seq2seq models are supported, and in arbitrary combinations. The trainer handles the low-level implementation details and "gotchas" of cycle-consistency training in the text-to-text generation domain, particularly regarding tokenization and batching. 
 
-The key innovation of the library over any other scripts is Multi-Adapter Cycle-Consistency Training (MACCT), which allows for the training of LoRA adapters ontop of a frozen base model. This allows for the use of much larger, more capable models compared to the two model setting. Note that base model isn't limited to 2x the size of one of the individual models from the full setting, it 
+The key innovation of the library over any other scripts is Multi-Adapter Cycle-Consistency Training (MACCT), which allows for the training of LoRA adapters ontop of a frozen base model. By sharing the base model weights, we don't double the size of model we can use, instead we can load a model that is `~7.5x larger`, for the same memory footprint.
 
 `NOTE:` All existing APIs are subject to change without notice.
 

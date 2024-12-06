@@ -10,7 +10,7 @@ license = "Attribution 4.0 International"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.11,<=3.12"
 transformers = "^4.46.1"
 torch = "^2.5.0"
 datasets = "^3.0.2"
@@ -20,6 +20,7 @@ rich = "^13.9.3"
 trl = "^0.11.4"
 typing-extensions = {version = "^4.12.2", python = ">=3.8,<3.12"}
 wandb = "^0.18.7"
+peft = "^0.13.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^8.3.3"
@@ -39,6 +40,11 @@ peft = "^0.13.2"
 mkdocs = "^1.6.1"
 mkdocstrings = {extras = ["python"], version = "^0.26.2"}
 mkdocs-material = "^9.5.43"
+pygments = "^2.18.0"
+
+
+[tool.poetry.group.liger.dependencies]
+liger-kernel = "^0.4.2"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
@@ -69,6 +75,7 @@ exclude = [
     "node_modules",
     "site-packages",
     "venv",
+    "misc",
 ]
 
 # Same as Transformers.
@@ -107,6 +114,10 @@ line-ending = "auto"
 [tool.ruff.lint.per-file-ignores]
 # Ignore import violations in all `__init__.py` files.
 "__init__.py" = ["F401"]
+
+[[tool.mypy.overrides]]
+module = "accelerate.*,datasets.*,transformers.*"
+ignore_missing_imports = true
 
 [tool.pytest]
 markers = [
