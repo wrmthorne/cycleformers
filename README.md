@@ -13,14 +13,16 @@
 
 </div>
 
-Cycleformers exposes a high-level but finely configurable API for transformer-based cycle-consistent architectures. The primary objective of the library is to provide a very simple framework to start using that works, out-of-the-box on as wide a range of hardware configurations as possible. This will enable quick iteration in training and research. The priority of flexibility is not limited to hardware - we aim to offer an interface that enforces no restrictions on the data, models (or number thereof), and enable immediate access to the latest versions of the Huggingface ecosystem. The fragmentation of training scripts for cycle-consistency across different domains, backend packages, and hardware selections has required frequent reimplementaion of the same idea to resolve implementation level details when the goal is to investigate the applications of the paradigm.
+Cycleformers is a Python library that simplifies the implementation of transformer-based cycle-consistency training. It offers a high-level API that is easy to use and configure, enabling researchers and developers to quickly start training and experimenting across a wide range of hardware configurations. Both causal and seq2seq models are supported, and in arbitrary combinations. The trainer handles the low-level implementation details and "gotchas" of cycle-consistency training in the text-to-text generation domain, particularly regarding tokenization and batching. 
+
+The key innovation of the library over any other scripts is Multi-Adapter Cycle-Consistency Training (MACCT), which allows for the training of LoRA adapters ontop of a frozen base model. This allows for the use of much larger, more capable models compared to the two model setting. Note that base model isn't limited to 2x the size of one of the individual models from the full setting, it 
 
 `NOTE:` All existing APIs are subject to change without notice.
 
 ## Features
 
 - 🚀 High-performance transformer implementations
-- 🔄 Cycle-consistent architecture
+- 🔄 Cycle-consistency training
 - 📊 A pure extension of the Huggingface ecosystem
 - 🛠️ Flexible and extensible design
 - 📝 Comprehensive documentation and examples
@@ -29,7 +31,8 @@ Cycleformers exposes a high-level but finely configurable API for transformer-ba
 
 - ✅ Causal-to-Causal cycle implementation
 - ✅ Adding peft into the main trainer rather than using a more complicated trainer thats too bespoke
-- 🚧 Saving and loading from checkpoints
+- ✅ Saving checkpoints
+- 🚧 Loading checkpoints
 - 🚧 arbitrary model-to-model training (mixed architectures, model families, etc.)
 - 🚧 Improved evaluation metrics
 
