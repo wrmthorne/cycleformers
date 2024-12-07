@@ -25,6 +25,7 @@ init-env:
 init: init-env
 	@echo "Installing dependencies..."
 	poetry install
+	poetry run pre-commit install
 
 -check-toml:
 	poetry check
