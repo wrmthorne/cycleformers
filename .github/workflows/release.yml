@@ -18,16 +18,15 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        cache: 'poetry'
 
     - name: Install Poetry
-      run: pipx install poetry
-
-    - name: Install dependencies
       run: |
+        pipx install poetry
         poetry config virtualenvs.create true
         poetry config virtualenvs.in-project true
-        poetry install
+
+    - name: Install dependencies
+      run: poetry install
 
     - name: Build distribution
       run: poetry build

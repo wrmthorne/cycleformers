@@ -11,18 +11,21 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'poetry'
-      - name: Setup Poetry
+      
+      - name: Install Poetry
         run: |
           pipx install poetry
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
+      
       - name: Install dependencies
         run: poetry install
+      
       - name: Formatting
         run: make format
 
@@ -32,18 +35,21 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'poetry'
-      - name: Setup Poetry
+      
+      - name: Install Poetry
         run: |
           pipx install poetry
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
+      
       - name: Install dependencies
         run: poetry install
+      
       - name: Linting
         run: make lint
 
@@ -61,17 +67,20 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'poetry'
-      - name: Setup Poetry
+      
+      - name: Install Poetry
         run: |
           pipx install poetry
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
+      
       - name: Install dependencies
         run: poetry install
+      
       - name: Run audit
         run: make audit
