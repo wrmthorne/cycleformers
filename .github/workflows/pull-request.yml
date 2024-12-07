@@ -63,11 +63,9 @@ jobs:
 
   tests:
     needs: format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: ./.github/workflows/test.yml
-        with:
-          test-args: '--all'
+    uses: ./.github/workflows/test.yml
+    with:
+      test-args: '--all'
 
   audit:
     needs:
