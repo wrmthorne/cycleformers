@@ -7,6 +7,7 @@ class DataConfig:
     """
     Arguments pertaining to what data we are going to input our model for training and eval.
     """
+
     dataset_name: str | None = None
     dataset_config_name: str | None = None
     text_column: str = "text"

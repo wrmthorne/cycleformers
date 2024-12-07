@@ -2,9 +2,10 @@
 -include .env
 SOURCE_DIR = src
 TEST_DIR = tests
-PROJECT_DIRS = $(SOURCE_DIR) $(TEST_DIR)
+EXAMPLE_DIR = examples
+PROJECT_DIRS = $(SOURCE_DIR) $(TEST_DIR) $(EXAMPLE_DIR)
 PWD := $(dir $(abspath $(firstword $(MAKEFILE_LIST))))
-PROJECT_NAME ?= CycleFormers
+PROJECT_NAME ?= Cycleformers
 PROJECT_VERSION ?= v$(shell poetry version -s)
 PYTHON_VERSION ?= 3.11
 .DEFAULT_GOAL := all
@@ -28,11 +29,15 @@ init: init-env
 -check-toml:
 	poetry check
 
+-reformat-src:
+	poetry run ruff format $(PROJECT_DIRS)
+	poetry run ruff check --select I --fix $(PROJECT_DIRS)
+
 -lint-src:
 	poetry run ruff check --fix $(SOURCE_DIR)
 	poetry run mypy --install-types --show-error-codes --non-interactive $(SOURCE_DIR)
 
-format: -check-toml
+format: -check-toml -reformat-src
 
 lint: -lint-src
 

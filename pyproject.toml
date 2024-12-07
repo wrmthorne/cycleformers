@@ -30,6 +30,7 @@ mypy = "^1.13.0"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
+bandit = "^1.8.0"
 
 
 [tool.poetry.group.peft.dependencies]

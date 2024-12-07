@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 
 import pytest
-from peft import LoraConfig
 from datasets import Dataset
-from peft import get_peft_model
+from peft import LoraConfig, get_peft_model
 from torch.optim import AdamW
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
+
 
 def pytest_addoption(parser):
     parser.addoption("--slow", action="store_true", help="Run slow tests")
@@ -35,7 +35,7 @@ class Seq2SeqModelTestConfig:
 
 @dataclass
 class CausalModelTestConfig:
-    model_name_or_path: str = "trl-internal-testing/tiny-LlamaForCausalLM-3.1" # TODO: Make own tiny models
+    model_name_or_path: str = "trl-internal-testing/tiny-LlamaForCausalLM-3.1"  # TODO: Make own tiny models
 
 
 @pytest.fixture(name="lora_config")
@@ -106,23 +106,21 @@ def fixture_seq2seq_inputs(text, seq2seq_tokenizer):
 
 @pytest.fixture(name="text_dataset")
 def fixture_text_dataset():
-    text = [
-        "This is a test input",
-        "This is another test input",
-        "This is a third and final test input"
-    ]
+    text = ["This is a test input", "This is another test input", "This is a third and final test input"]
     labels = [
         "This is an acknowledgement",
         "This is another acknowledgement",
-        "This is a third and final acknowledgement"
+        "This is a third and final acknowledgement",
     ]
     return Dataset.from_dict({"text": text, "labels": labels})
 
 
 @pytest.fixture(name="tokenized_dataset")
 def fixture_tokenized_dataset(causal_tokenizer, text_dataset):
-    dataset = text_dataset.map(lambda x: {
-        **causal_tokenizer(x["text"], return_tensors="pt"),
-        "labels": causal_tokenizer(x["labels"], return_tensors="pt")['input_ids']
-    }).remove_columns(["text"])
+    dataset = text_dataset.map(
+        lambda x: {
+            **causal_tokenizer(x["text"], return_tensors="pt"),
+            "labels": causal_tokenizer(x["labels"], return_tensors="pt")["input_ids"],
+        }
+    ).remove_columns(["text"])
     return dataset

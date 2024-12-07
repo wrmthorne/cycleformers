@@ -1,16 +1,17 @@
-from pathlib import Path
 import sys
-from transformers import (
-    HfArgumentParser,
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    AutoConfig,
-    AutoModelForSeq2SeqLM,
-)
-from datasets import load_from_disk
+from pathlib import Path
 
-from cycleformers import CycleTrainer, CycleTrainingArguments, ModelConfig, DataConfig
-from cycleformers.utils import suffix_dataclass_factory, get_peft_config
+from datasets import load_from_disk
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    HfArgumentParser,
+)
+
+from cycleformers import CycleTrainer, CycleTrainingArguments, DataConfig, ModelConfig
+from cycleformers.utils import get_peft_config, suffix_dataclass_factory
 
 
 def get_model_and_tokenizer(model_config, training_args):
@@ -31,10 +32,7 @@ def get_model_and_tokenizer(model_config, training_args):
         device_map="auto",
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_config.model_name_or_path,
-        use_fast=True
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, use_fast=True)
     return model, tokenizer
 
 
@@ -47,7 +45,10 @@ def main():
     if maybe_yaml.suffix == ".yaml" and maybe_yaml.exists():
         training_args, model_config = parser.parse_yaml_file(maybe_yaml)
     else:
-        training_args, model_config, = parser.parse_args_into_dataclasses()
+        (
+            training_args,
+            model_config,
+        ) = parser.parse_args_into_dataclasses()
 
     # TODO: Allow user specified datasests in a generic script
     dataset_A = load_from_disk("./data/en")
@@ -57,17 +58,17 @@ def main():
     models, tokenizer = get_model_and_tokenizer(model_config, training_args)
     if not model_config.use_peft:
         model_B, _ = get_model_and_tokenizer(model_config, training_args)
-        models = {'A': models, 'B': model_B}
+        models = {"A": models, "B": model_B}
 
     trainer = CycleTrainer(
         args=training_args,
         models=models,
         tokenizers=tokenizer,
-        train_dataset_A=dataset_A['train'],
-        train_dataset_B=dataset_B['train'],
-        eval_dataset_A=dataset_A['test'] if not training_args.eval_strategy == 'no' else None,
-        eval_dataset_B=dataset_B['test'] if not training_args.eval_strategy == 'no' else None,
-        peft_configs=get_peft_config(model_config) if model_config.use_peft else None, # FIXME: Won't work just yet
+        train_dataset_A=dataset_A["train"],
+        train_dataset_B=dataset_B["train"],
+        eval_dataset_A=dataset_A["test"] if not training_args.eval_strategy == "no" else None,
+        eval_dataset_B=dataset_B["test"] if not training_args.eval_strategy == "no" else None,
+        peft_configs=get_peft_config(model_config) if model_config.use_peft else None,  # FIXME: Won't work just yet
     )
 
     trainer.train()

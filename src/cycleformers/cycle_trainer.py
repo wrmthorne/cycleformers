@@ -34,19 +34,19 @@ from .utils import auto_temp_attributes
 
 class CycleTrainer(Trainer):
     def __init__(
-            self,
-            args: CycleTrainingArguments,
-            models: nn.Module | dict[str, nn.Module] | None = None,
-            tokenizers: PreTrainedTokenizerBase | dict[str, PreTrainedTokenizerBase] | None = None,
-            train_dataset_A = None,
-            train_dataset_B = None,
-            eval_dataset_A = None,
-            eval_dataset_B = None,
-            data_collator_A = None,
-            data_collator_B = None,
-            callbacks = None,
-            peft_configs: PeftConfig | dict[str, PeftConfig] | None = None
-        ):
+        self,
+        args: CycleTrainingArguments,
+        models: nn.Module | dict[str, nn.Module] | None = None,
+        tokenizers: PreTrainedTokenizerBase | dict[str, PreTrainedTokenizerBase] | None = None,
+        train_dataset_A=None,
+        train_dataset_B=None,
+        eval_dataset_A=None,
+        eval_dataset_B=None,
+        data_collator_A=None,
+        data_collator_B=None,
+        callbacks=None,
+        peft_configs: PeftConfig | dict[str, PeftConfig] | None = None,
+    ):
         self.args = args
 
         # Handle model initialization
@@ -69,9 +69,7 @@ class CycleTrainer(Trainer):
             if isinstance(peft_configs, PeftConfig):
                 # Single config - create two identical adapters
                 if hasattr(peft_configs, "adapter_name") and peft_configs.adapter_name is not None:
-                    warnings.warn(
-                        "adapter_name in peft_config will be ignored. Using 'A' and 'B' as adapter names"
-                    )
+                    warnings.warn("adapter_name in peft_config will be ignored. Using 'A' and 'B' as adapter names")
 
                 # Create model with first adapter
                 self.model_A = self.model_B = get_peft_model(models, peft_configs, adapter_name="A")
@@ -111,11 +109,11 @@ class CycleTrainer(Trainer):
 
         # Extract tokenizers from input
         if isinstance(tokenizers, dict):
-            if tokenizers.keys() != {'A', 'B'}:
+            if tokenizers.keys() != {"A", "B"}:
                 raise ValueError(f"Got unexpected tokenizer keys: {tokenizers.keys()}")
 
             if tokenizers["A"] == tokenizers["B"]:
-                tokenizer_A = tokenizer_B = tokenizers["A"] # TODO: Find equality function for tokenizers
+                tokenizer_A = tokenizer_B = tokenizers["A"]  # TODO: Find equality function for tokenizers
             else:
                 tokenizer_A = tokenizers["A"]
                 tokenizer_B = tokenizers["B"]
@@ -148,22 +146,22 @@ class CycleTrainer(Trainer):
 
         # TODO: Separate our train and eval if we support multiple eval datasets
         for dataset, tokenizer, model, attr_name in [
-            (train_dataset_A, self.tokenizer_A, self.model_A, 'train_dataset_A'),
-            (train_dataset_B, self.tokenizer_B, self.model_B, 'train_dataset_B'),
-            (eval_dataset_A, self.tokenizer_A, self.model_A, 'eval_dataset_A'),
-            (eval_dataset_B, self.tokenizer_B, self.model_B, 'eval_dataset_B')
+            (train_dataset_A, self.tokenizer_A, self.model_A, "train_dataset_A"),
+            (train_dataset_B, self.tokenizer_B, self.model_B, "train_dataset_B"),
+            (eval_dataset_A, self.tokenizer_A, self.model_A, "eval_dataset_A"),
+            (eval_dataset_B, self.tokenizer_B, self.model_B, "eval_dataset_B"),
         ]:
             # FIXME: Replace hard coded values once dataset configs are working
             if dataset is not None:
                 dataset = self._prepare_dataset(
                     dataset=dataset,
                     processing_class=tokenizer,
-                    text_column='text',
+                    text_column="text",
                     max_seq_length=None,
                     remove_unused_columns=True,
                     formatting_func=None,
                     add_special_tokens=True,
-                    skip_prepare_dataset=False
+                    skip_prepare_dataset=False,
                 )
                 # Only hack I could find to not have lots of repeat code
                 setattr(self, attr_name, dataset)
@@ -173,7 +171,9 @@ class CycleTrainer(Trainer):
             # Calculate number of samples per epoch
             num_samples_per_epoch = min(len(train_dataset_A), len(train_dataset_B))
             # Calculate number of steps considering batch size and gradient accumulation
-            num_update_steps_per_epoch = num_samples_per_epoch // (args.per_device_train_batch_size * args.gradient_accumulation_steps)
+            num_update_steps_per_epoch = num_samples_per_epoch // (
+                args.per_device_train_batch_size * args.gradient_accumulation_steps
+            )
             num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
             args.max_steps = math.ceil(args.num_train_epochs * num_update_steps_per_epoch)
 
@@ -191,14 +191,13 @@ class CycleTrainer(Trainer):
             self.model_B.set_adapter(self.adapter_B)
         self.optimizer_B, self.lr_scheduler_B = self.create_optimizer_and_scheduler(self.model_B, args.max_steps)
 
-
         # Prepare models and optimizers with accelerator
         prepared = self.accelerator.prepare(
-            self.model_A, self.optimizer_A, self.lr_scheduler_A,
-            self.model_B, self.optimizer_B, self.lr_scheduler_B
+            self.model_A, self.optimizer_A, self.lr_scheduler_A, self.model_B, self.optimizer_B, self.lr_scheduler_B
         )
-        self.model_A, self.optimizer_A, self.lr_scheduler_A, self.model_B, \
-            self.optimizer_B, self.lr_scheduler_B = prepared
+        self.model_A, self.optimizer_A, self.lr_scheduler_A, self.model_B, self.optimizer_B, self.lr_scheduler_B = (
+            prepared
+        )
 
         ## Trainer specific setup
 
@@ -229,7 +228,7 @@ class CycleTrainer(Trainer):
         remove_unused_columns,
         formatting_func: Callable | None = None,
         add_special_tokens=True,
-        skip_prepare_dataset=False
+        skip_prepare_dataset=False,
     ):
         """
         Modification of TRL SFTTrainer._prepare_dataset
@@ -241,8 +240,9 @@ class CycleTrainer(Trainer):
         if skip_prepare_dataset:
             return dataset
 
-        column_names = dataset.column_names if isinstance(dataset, (datasets.Dataset, datasets.IterableDataset)) else None
-
+        column_names = (
+            dataset.column_names if isinstance(dataset, (datasets.Dataset, datasets.IterableDataset)) else None
+        )
 
         if column_names and "input_ids" in column_names:
             if formatting_func is not None:
@@ -256,9 +256,9 @@ class CycleTrainer(Trainer):
             def formatting_func(x):
                 return x["input_ids"]
 
-        if isinstance(
-            dataset, (torch.utils.data.IterableDataset, torch.utils.data.Dataset)
-        ) and not isinstance(dataset, datasets.IterableDataset):
+        if isinstance(dataset, (torch.utils.data.IterableDataset, torch.utils.data.Dataset)) and not isinstance(
+            dataset, datasets.IterableDataset
+        ):
             return dataset
 
         def tokenize(element):
@@ -298,30 +298,22 @@ class CycleTrainer(Trainer):
         map_kwargs = {
             "batched": True,
             "remove_columns": dataset.column_names if remove_unused_columns else None,
-            "batch_size": 4 # FIXME: self.dataset_batch_size,
+            "batch_size": 4,  # FIXME: self.dataset_batch_size,
         }
 
         if isinstance(dataset, datasets.Dataset):
-            map_kwargs["num_proc"] = 4 # FIXME: self.dataset_num_proc  # this arg is not available for IterableDataset
+            map_kwargs["num_proc"] = 4  # FIXME: self.dataset_num_proc  # this arg is not available for IterableDataset
         tokenized_dataset = dataset.map(tokenize, **map_kwargs)
 
         return tokenized_dataset
 
-
     def get_train_dataloader(self, dataset, data_collator):
-        dataloader_params = {
-            "batch_size": self.args.per_device_train_batch_size,
-            "collate_fn": data_collator
-        }
+        dataloader_params = {"batch_size": self.args.per_device_train_batch_size, "collate_fn": data_collator}
         return self.accelerator.prepare(DataLoader(dataset, **dataloader_params))
 
     def get_eval_dataloader(self, dataset, data_collator):
-        dataloader_params = {
-            "batch_size": self.args.per_device_eval_batch_size,
-            "collate_fn": data_collator
-        }
+        dataloader_params = {"batch_size": self.args.per_device_eval_batch_size, "collate_fn": data_collator}
         return self.accelerator.prepare(DataLoader(dataset, **dataloader_params))
-
 
     def _save_checkpoint(self, model, trial=None, metrics=None):
         """Minor reimplementation of parent class method"""
@@ -331,7 +323,7 @@ class CycleTrainer(Trainer):
         self.hp_search_backend = None
         self.is_fsdp_enabled = False
         self.is_deepspeed_enabled = False
-        self.current_flos = 0 # FIXME: Remember to remove this
+        self.current_flos = 0  # FIXME: Remember to remove this
         # TODO: Handle hyper-parameter searches?
         if self.hp_search_backend is None and trial is None:
             self.store_flos()
@@ -380,22 +372,18 @@ class CycleTrainer(Trainer):
             # mtime is not reliable especially on some fuse fs in cloud environments.
             self._rotate_checkpoints(use_mtime=False, output_dir=run_dir)
 
-
-    @auto_temp_attributes('model', 'processing_class')
+    @auto_temp_attributes("model", "processing_class")
     def save_model(self, output_dir: str, model, _internal_call: bool = False):
         super().save_model(output_dir, _internal_call)
 
-
-    @auto_temp_attributes('optimizer', 'lr_scheduler')
+    @auto_temp_attributes("optimizer", "lr_scheduler")
     def _save_optimizer_and_scheduler(self, output_dir: str, optimizer, lr_scheduler):
         super()._save_optimizer_and_scheduler(output_dir)
 
-
-    @auto_temp_attributes('model', 'optimizer', 'optimizer_cls_and_kwargs', 'lr_scheduler')
+    @auto_temp_attributes("model", "optimizer", "optimizer_cls_and_kwargs", "lr_scheduler")
     def create_optimizer_and_scheduler(self, model, num_training_steps: int):
         super().create_optimizer_and_scheduler(num_training_steps=num_training_steps)
         return self.optimizer, self.lr_scheduler
-
 
     def train(self):
         args = self.args
@@ -458,7 +446,7 @@ class CycleTrainer(Trainer):
                     scheduler=scheduler_A,
                     batch=batch_B,
                     idx=idx,
-                    cycle_name="A"
+                    cycle_name="A",
                 )
                 metrics_B = self._cycle_step(
                     model_train=model_B,
@@ -469,7 +457,7 @@ class CycleTrainer(Trainer):
                     scheduler=scheduler_B,
                     batch=batch_A,
                     idx=idx,
-                    cycle_name="B"
+                    cycle_name="B",
                 )
 
                 del batch_A, batch_B
@@ -514,7 +502,9 @@ class CycleTrainer(Trainer):
         finally:
             model.set_adapter(previous_adapter)
 
-    def _cycle_step(self, model_train, model_gen, tokenizer_train, tokenizer_gen, optimizer, scheduler, batch, idx, cycle_name):
+    def _cycle_step(
+        self, model_train, model_gen, tokenizer_train, tokenizer_gen, optimizer, scheduler, batch, idx, cycle_name
+    ):
         """Perform a single cycle step"""
         model_gen.eval()
         model_train.train()
@@ -527,15 +517,12 @@ class CycleTrainer(Trainer):
         with self.switch_adapter(model_gen, gen_adapter):
             with torch.inference_mode():
                 synth_batch_ids = model_gen.generate(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch["attention_mask"],
-                    max_new_tokens=100
+                    input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], max_new_tokens=100
                 )
 
         # Prepare inputs using generated text
         synth_batch = self._cycle_prepare_inputs(
-            batch["input_ids"], synth_batch_ids, model_gen, model_train,
-            tokenizer_gen, tokenizer_train, cycle_name
+            batch["input_ids"], synth_batch_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name
         )
         synth_batch = {k: v.to(self.accelerator.device) for k, v in synth_batch.items()}
 
@@ -546,7 +533,7 @@ class CycleTrainer(Trainer):
             self.accelerator.backward(loss)
 
             # Update if needed
-            if (idx+1) % self.args.gradient_accumulation_steps == 0:
+            if (idx + 1) % self.args.gradient_accumulation_steps == 0:
                 metrics[f"train_loss_{cycle_name}"] = loss.detach().float().item()
                 metrics[f"learning_rate_{cycle_name}"] = optimizer.param_groups[0]["lr"]
                 optimizer.step()
@@ -559,7 +546,9 @@ class CycleTrainer(Trainer):
 
         return metrics
 
-    def _cycle_prepare_inputs(self, real_input_ids, synth_input_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name):
+    def _cycle_prepare_inputs(
+        self, real_input_ids, synth_input_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name
+    ):
         """Scenarios that need testing:
         1) Order of inputs is correct
         2) No inputs have been truncated in any way
@@ -567,7 +556,7 @@ class CycleTrainer(Trainer):
         4) Attention mask correctly accounts for padding
         """
         if not model_gen.config.is_encoder_decoder:
-            synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1]:]
+            synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1] :]
 
         # TODO: Skip retokenization if tokenizers are identical
         synth_batch_text = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
@@ -576,23 +565,25 @@ class CycleTrainer(Trainer):
             input_texts = tokenizer_train.batch_decode(real_input_ids, skip_special_tokens=True)
             # TODO: Investigate tokenizer_train.eos_token as separator to appear more like packed training instances
             # TODO: Potentially add a configurable templating function here
-            synth_batch_text = [synth_text + "\n\n" + input_text for synth_text, input_text in zip(synth_batch_text, input_texts)]
-
+            synth_batch_text = [
+                synth_text + "\n\n" + input_text for synth_text, input_text in zip(synth_batch_text, input_texts)
+            ]
 
         # Temporarily call padding_side in tokenizer to ensure position ids are correct for loss calculation
         synth_batch = tokenizer_train(
             synth_batch_text,
             return_tensors="pt",
             padding=True,
-            padding_side="right" if not model_train.config.is_encoder_decoder else tokenizer_train.padding_side
+            padding_side="right" if not model_train.config.is_encoder_decoder else tokenizer_train.padding_side,
         )
 
         # Everything up to -real_input_ids.shape[-1] is the prompt therefore -100
-        synth_batch['labels'] = synth_batch["input_ids"].clone()
-        synth_batch['labels'][:, :-real_input_ids.shape[-1]] = -100 # TODO: Make sure this doesn't include leasing whitespace
+        synth_batch["labels"] = synth_batch["input_ids"].clone()
+        synth_batch["labels"][
+            :, : -real_input_ids.shape[-1]
+        ] = -100  # TODO: Make sure this doesn't include leasing whitespace
 
         return synth_batch
-
 
     def evaluate(self, ignore_keys=None):
         metrics = {}

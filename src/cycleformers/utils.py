@@ -1,14 +1,21 @@
 import inspect
 from dataclasses import field, fields, make_dataclass
 from functools import wraps
-from typing import Any, get_type_hints
+from typing import Any, Protocol, TypeVar, cast, get_type_hints
 
 from peft import LoraConfig
 
-from .types import DataclassProtocol
+
+class DataclassProtocol(Protocol):
+    __dataclass_fields__: dict[str, Any]
+    __name__: str
+    __dataclass_params__: Any
 
 
-def suffix_dataclass_factory(base_class: DataclassProtocol, suffix: str = '_A') -> DataclassProtocol:
+T = TypeVar("T", bound=DataclassProtocol)
+
+
+def suffix_dataclass_factory(base_class: type[T], suffix: str = "_A") -> type[T]:
     """
     Creates a new dataclass by appending a suffix to the base class name and all its fields.
 
@@ -19,10 +26,10 @@ def suffix_dataclass_factory(base_class: DataclassProtocol, suffix: str = '_A') 
     returns:
         New dataclass with suffixed name and fields
     """
-    if not hasattr(base_class, '__dataclass_fields__'):
+    if not hasattr(base_class, "__dataclass_fields__"):
         raise TypeError("Base class must be a dataclass")
 
-    original_fields = fields(base_class)
+    original_fields = fields(cast(Any, base_class))
     type_hints = get_type_hints(base_class)
 
     new_fields = []
@@ -30,31 +37,29 @@ def suffix_dataclass_factory(base_class: DataclassProtocol, suffix: str = '_A') 
         field_type = type_hints.get(og_field.name, Any)
         new_field_name = og_field.name + suffix
 
-        # Preserve metadata
-        field_kwargs = {
-            'init': bool(og_field.init),
-            'repr': bool(og_field.repr),
-            'compare': bool(og_field.compare),
-            'metadata': dict(og_field.metadata or {}),
-        }
+        # Create field with explicit parameters instead of dict
+        field_obj = field(
+            init=bool(og_field.init),
+            repr=bool(og_field.repr),
+            compare=bool(og_field.compare),
+            metadata=dict(og_field.metadata or {}),
+        )
 
         # Handle default values
         if og_field.default is not og_field.default_factory:
-            field_kwargs['default'] = og_field.default
-        if og_field.default is not og_field.default_factory:
-            field_kwargs['default'] = og_field.default
-        if og_field.default_factory is not og_field.default_factory.__class__:  # Changed this line
-            field_kwargs['default_factory'] = og_field.default_factory
+            field_obj.default = og_field.default
+        if og_field.default_factory is not og_field.default_factory.__class__:
+            field_obj.default_factory = og_field.default_factory
 
-        new_fields.append((new_field_name, field_type, field(**field_kwargs)))
+        new_fields.append((new_field_name, field_type, field_obj))
 
     # Create new dataclass without inheriting from base class
-    new_class_name = base_class.__name__ + suffix.replace('_', '')
+    new_class_name = base_class.__name__ + suffix.replace("_", "")
     new_class = make_dataclass(
         new_class_name,
         new_fields,
         bases=(),  # No inheritance
-        frozen=getattr(base_class, '__dataclass_params__').frozen
+        frozen=getattr(base_class, "__dataclass_params__").frozen,
     )
     return new_class
 
@@ -65,6 +70,7 @@ def auto_temp_attributes(*attrs_to_cleanup):
     This solves the issue of methods that modify attributes that are needed for other methods.
     Parameters matching attribute names are set to their passed values, others to None.
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
@@ -82,7 +88,7 @@ def auto_temp_attributes(*attrs_to_cleanup):
             # Set attributes based on parameters
             for attr in attrs_to_cleanup:
                 # Skip 'self' parameter
-                if attr in bound_args.arguments and attr != 'self':
+                if attr in bound_args.arguments and attr != "self":
                     setattr(self, attr, bound_args.arguments[attr])
                 else:
                     setattr(self, attr, None)
@@ -101,7 +107,9 @@ def auto_temp_attributes(*attrs_to_cleanup):
                             delattr(self, attr)
                         except AttributeError:
                             pass
+
         return wrapper
+
     return decorator
 
 

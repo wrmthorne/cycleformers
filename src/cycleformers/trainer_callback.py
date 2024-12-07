@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CycleTrainerState(TrainerState):
     """Extension of TrainerState to handle cycle-specific states"""
+
     steps_a: int = 0  # Number of updates for model A
     steps_b: int = 0  # Number of updates for model B
     loss_a: float = 0.0  # Current loss for model A
@@ -70,8 +71,15 @@ class CycleTrainerState(TrainerState):
 class CallbackHandler(TrainerCallback):
     """Internal class that just calls the list of callbacks in order."""
 
-    def __init__(self, callbacks: list[TrainerCallback], model: dict[str, Any], processing_class: dict[str, Any], optimizer: dict[str, Any], lr_scheduler: dict[str, Any]):
-        self.callbacks = []
+    def __init__(
+        self,
+        callbacks: list[TrainerCallback],
+        model: dict[str, Any],
+        processing_class: dict[str, Any],
+        optimizer: dict[str, Any],
+        lr_scheduler: dict[str, Any],
+    ):
+        self.callbacks: list[TrainerCallback] = []
         for cb in callbacks:
             self.add_callback(cb)
         self.model = model
@@ -186,16 +194,14 @@ class CallbackHandler(TrainerCallback):
                     state,
                     control,
                     model=self.model,
-                processing_class=self.processing_class,
-                optimizer=self.optimizer,
-                lr_scheduler=self.lr_scheduler,
-                train_dataloader=self.train_dataloader,
-                eval_dataloader=self.eval_dataloader,
-                **kwargs,
-            )
+                    processing_class=self.processing_class,
+                    optimizer=self.optimizer,
+                    lr_scheduler=self.lr_scheduler,
+                    train_dataloader=self.train_dataloader,
+                    eval_dataloader=self.eval_dataloader,
+                    **kwargs,
+                )
             # A Callback can skip the return of `control` if it doesn't change it.
             if result is not None:
                 control = result
         return control
-
-

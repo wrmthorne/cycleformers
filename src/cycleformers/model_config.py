@@ -4,7 +4,7 @@ from typing import Literal
 
 @dataclass
 class ModelConfig:
-    """ https://github.com/huggingface/trl/blob/main/trl/trainer/model_config.py
+    """https://github.com/huggingface/trl/blob/main/trl/trainer/model_config.py
 
     Parameters:
         model_name_or_path (`Optional[str]`, *optional*, defaults to `None`):
@@ -51,6 +51,7 @@ class ModelConfig:
             Quantization type (`"fp4"` or `"nf4"`).
         use_bnb_nested_quant (`bool`, *optional*, defaults to `False`):
             Whether to use nested quantization."""
+
     model_name_or_path: str | None = None
     model_revision: str = "main"
     torch_dtype: Literal["auto", "bfloat16", "float16", "float32"] | None = None
