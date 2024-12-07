@@ -10,7 +10,7 @@ license = "Attribution 4.0 International"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.11,<=3.12"
+python = ">=3.11,<3.13"
 transformers = "^4.46.1"
 torch = "^2.5.0"
 datasets = "^3.0.2"
