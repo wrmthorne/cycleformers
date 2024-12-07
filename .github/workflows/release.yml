@@ -9,24 +9,18 @@ jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
-    timeout-minutes: 10
 
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
 
     - name: Install Poetry
+      run: pipx install poetry
+
+    - name: Install dependencies
       run: |
         pipx install poetry
         poetry config virtualenvs.create true
         poetry config virtualenvs.in-project true
-
-    - name: Install dependencies
-      run: poetry install
 
     - name: Build distribution
       run: poetry build
@@ -50,7 +44,6 @@ jobs:
       - test
       - build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
 
     environment:
       name: testpypi
@@ -79,7 +72,6 @@ jobs:
       - test
       - build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/project/cycleformers/
@@ -97,11 +89,12 @@ jobs:
 
   # === Create GitHub Release === #
   github-release:
-    name: Sign Python distribution and upload to GitHub Releases
+    name: >-
+      Sign Python distribution with Sigstore
+      and uploade to GitHub Releases
     needs:
       - publish-to-pypi
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     permissions:
       contents: write
@@ -115,7 +108,7 @@ jobs:
           path: dist/
 
       - name: Sign dists with Sigstore
-        uses: sigstore/gh-action-sigstore-python@v3.1.0
+        uses: sigstore/gh-action-sigstore-python@v3.0.0
         with:
           inputs: >-
             ./dist/*.tar.gz

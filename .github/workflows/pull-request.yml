@@ -8,50 +8,58 @@ on:
 jobs:
   format:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v3
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
-      
-      - name: Install Poetry
+          python-version: 3.11
+      - name: Setup Poetry
         run: |
-          pipx install poetry
+          pip install poetry
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-      
+      - name: Install dependencies from cache
+        id: poetry-cache
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: poetry-ci-dependencies-${{ hashFiles('**/poetry.lock') }}
       - name: Install dependencies
-        run: poetry install
-      
+        run: poetry install --no-interaction --no-root
+        if: steps.poetry-cache.outputs.cache-hit != 'true'
+
       - name: Formatting
-        run: make format
+        run: |
+          make format
 
   lint-source:
     needs: format
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v3
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
-      
-      - name: Install Poetry
+          python-version: 3.11
+      - name: Setup Poetry
         run: |
-          pipx install poetry
+          pip install poetry
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-      
+      - name: Install dependencies from cache
+        id: poetry-cache
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: poetry-ci-dependencies-${{ hashFiles('**/poetry.lock') }}
       - name: Install dependencies
-        run: poetry install
-      
+        run: poetry install --no-interaction --no-root
+        if: steps.poetry-cache.outputs.cache-hit != 'true'
+
       - name: Linting
-        run: make lint
+        run: |
+          make lint
 
   tests:
     needs: format
@@ -64,23 +72,27 @@ jobs:
       - format
       - tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v3
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
-      
-      - name: Install Poetry
-        run: |
-          pipx install poetry
+          python-version: 3.11
+      - name: Setup Poetry
+        run: | 
+          pip install poetry
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-      
+      - name: Install dependencies from cache
+        id: poetry-cache
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: poetry-ci-dependencies-${{ hashFiles('**/poetry.lock') }}
       - name: Install dependencies
-        run: poetry install
-      
+        run: poetry install --no-interaction --no-root
+        if: steps.poetry-cache.outputs.cache-hit != 'true'
+
       - name: Run audit
-        run: make audit
+        run: |
+          make audit
