@@ -1,102 +1,107 @@
-# CycleLightning
-A generic template script for cycle consistency training using pytorch lightning and the transformers library. The script trains each model on the output of the other iteratively. 
+# Cycleformers
 
-`WARNING`: This script has only been tested on LLaMA, GPT2 and T5. If you find any irregularities, please open an issue and I will take a look when I can.
+<div align="center">
 
-`WARNING`: This script has not been tested on multi-GPU setups.
+[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
+<!-- ![Coverage](.github/badges/coverage.svg) -->
+<!-- [![Build Status](https://github.com/wrmthorne/cycleformers/workflows/CI-Pipeline/badge.svg)](https://github.com/wrmthorne/cycleformers/actions) -->
 
-## Project Setup
+</div>
 
-Required libraries can be installed using the `requirements.txt` file with pip, conda or your other favourite package manager.
+A Python library for efficient cycle-consistency training of transformer models. Cycleformers simplifies iterative back-translation with support for both causal and seq2seq architectures. We also implement Multi-Adapter Cycle-Consistency Training (MACCT), enabling training of LoRA adapters on a frozen base model for `7.5x` larger model capacity for the same memory footprint.
 
-## Training
+## Features
 
-The script currently only supports models A and B being the same*. The two current supported generation types are causal and seq2seq.
+- 🤗 Seamless integration with Hugging Face Transformers
+- 🚀 PEFT/LoRA support for memory-efficient training
+- 🤖 Compatible with both causal and seq2seq models
+- 🔥 Optimized for various hardware configurations
+
+
+## Quick Tour
+
+### Installation
 
 ```bash
-# Causal example
-python train.py --model_name_or_path gpt2 --task causal_lm
-
-# Seq2Seq example
-python train.py --model_name_or_path t5-small --task seq2seq_lm
+pip install cycleformers
 ```
 
-All script arguments can be found with:
-```bash
-python train.py --help
-```
+### Training
 
-\* This may change in the future to allow e.g. model A to be causal and model B to be seq2seq.
+The `CycleTrainer` class is an extension but significant redesign of the 🤗 Transformers trainer, designed to abstract away the specifics of training while remaining configurable. Both Seq2Seq and Causal architectures are supported, each able to train via PEFT adapter swapping for memory efficient configurations. Check the [docs] for [usage] details and [examples].
 
-## Data Format
-
-Datasets A and B can be imported in the same or different formats, e.g. both in json or one in json and one in DatasetDict.
-
-Datasets can be mismatched in size and can optionally have a validation split. Data will be interleaved until the smaller dataset is cully consumed, after which only the larger dataset will be used for training. This constitues one complete epoch. 
-
-You can pass any directories/files you want for datasets A or B but recommended best practice is as follows:
-
-```
-data
-|
-project_name e.g. CycleNER
-|
-└───split_a_name e.g. Sentences
-|    |  files/directories
-|
-└───split_b_name e.g. EntitySequences
-     |   files/directories
-```
-
-See `data/example` as an example for DatasetDict.
-
-### JSON & JSONL
-Only allows for training data, no validation data can be supplied. If you want to use validation data, please use one of the other listed formats.
-```json
-[
-    {"text": "this is some text"},
-    {"text": "this is some other text"}
-]
-```
-
-```json
-{"text": "this is some text"}
-{"text": "this is some other text"}
-```
-
-### DatasetDict
-Can optionally contain a validation split for datasets A and/or B.
+To train using two identical models the following sample code can be used along with two datasets:
 
 ```python
-DatasetDict({
-    train: Dataset({
-        features: ['text'],
-        num_rows: L
-    }),
-    validation: Dataset({
-        features: ['text', 'label'],
-        num_rows: M
-    })
-    test: Dataset({
-        features: ['text', 'label'],
-        num_rows: N
-    })
-})
+from cycleformers import CycleTrainer, CycleTrainingArguments
+
+model = AutoModelForCausalLM.from_pretrained("gpt2", device_map="auto")
+tokenizer = AutoTokenizer.from_pretrained("gpt2")
+
+args = CycleTrainingArguments(output_dir="gpt2-cct")
+trainer = CycleTrainer(
+    args, 
+    models = model
+    tokenizers = tokenizer
+    train_dataset_A = dataset_A,
+    train_dataset_B = dataset_B
+)
+trainer.train()
 ```
 
-## Quantisation and PEFT
+Any two models (🚧 currently both seq2seq or both causal) can be combined together for completely customisable training:
 
-There is inbuilt integration with BitsAndBytes and LoRA modules. To enable LoRA, set the `full_finetune` flag to be false and set `bits` flag to 4 or 8 for 4- or 8-bit quantisation respectively. e.g.
+```python
+model_A = AutoModelForCausalLM.from_pretrained("gpt2", device_map="auto")
+model_B = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base", device_map="auto")
+tokenizer_A = AutoTokenizer.from_pretrained("gpt2")
+tokenizer_B = AutoTokenizer.from_pretrained("google/flan-t5-small")
 
-```bash
-python train.py --model_name_or_path <path to llama weights> --task 'causal_lm' --full_finetune False --bits 4
+trainer = CycleTrainer(
+    args, 
+    models = {
+        "A": model_A,
+        "B": model_B
+    }
+    tokenizers = {
+        "A": tokenizer_A,
+        "B": tokenizer_B
+    }
+    train_dataset_A = dataset_A,
+    train_dataset_B = dataset_B
+)
 ```
 
-All LoRA parameters can be controlled through command line arguments.
+### Multi-Adapter Cycle-Consistency Training (MACCT)
 
-Automatically extracting the layers to add LoRA modules to is not 100% working e.g. for both GPT and T5. You can manually specify the layers to add LoRA modules to with a flag set in the following way:
+The `CycleTrainer` class is also setup to accept a single base model and train two PEFT adapters ontop of it, switching between them to emulate the two model setup. This allows for the training of `7.5x larger models` for the same memory footprint:
 
-```bash
-# E.g. for T5
---modules o v q wi_0 wi_1 # etc.
+```python
+peft_config = PeftConfig(
+    task_type="CAUSAL_LM",
+    r=16,
+    lora_alpha=32,
+    target_modules="all-linear",
+    inference_mode=False,
+    bias="none"
+)
+
+args = CycleTrainingArguments(output_dir="gpt2-macct")
+trainer = CycleTrainer(
+    args, 
+    model = model,
+    tokenizer = tokenizer,
+    peft_configs = peft_config # Or same A, B dict
+)
+```
+
+
+
+## Citing
+
+If you use Cycleformers in your research, please cite:
+
+```bibtex
+add once zenodo/paper citation is available
 ```

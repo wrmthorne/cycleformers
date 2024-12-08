@@ -1,0 +1,131 @@
+[tool.poetry]
+name = "cycleformers"
+packages = [
+    { from = "src", include = "cycleformers" },
+]
+version = "0.1.0"
+description = "A comprehensive implementation of the cycle-consistency training paradigm, extending the Huggingface Transformers trainer API to accommodate arbitrary combinations of generative models."
+authors = ["William Thorne <wthorne1@sheffield.ac.uk>"]
+license = "Attribution 4.0 International"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+transformers = "^4.46.1"
+torch = "^2.5.0"
+datasets = "^3.0.2"
+matplotlib = "^3.9.2"
+gputil = "^1.4.0"
+rich = "^13.9.3"
+trl = "^0.11.4"
+typing-extensions = {version = "^4.12.2", python = ">=3.8,<3.12"}
+wandb = "^0.18.7"
+peft = "^0.13.2"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.3.3"
+pre-commit = "^4.0.1"
+ruff = "^0.7.1"
+mypy = "^1.13.0"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+bandit = "^1.8.0"
+
+
+[tool.poetry.group.peft.dependencies]
+peft = "^0.13.2"
+
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = "^1.6.1"
+mkdocstrings = {extras = ["python"], version = "^0.26.2"}
+mkdocs-material = "^9.5.43"
+pygments = "^2.18.0"
+
+
+[tool.poetry.group.liger.dependencies]
+liger-kernel = "^0.4.2"
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+    "misc",
+]
+
+# Same as Transformers.
+line-length = 119
+indent-width = 4
+
+target-version = "py311"
+
+[tool.ruff.lint]
+# Same as Transformers.
+ignore = ["C901", "E501", "E741", "F402", "F823" ]
+select = [
+    "C",
+    "E",
+    "F",
+    "I",
+    "W",
+    "UP006",  # Use built-in types instead of typing ones (list vs List)
+    "UP007",  # Use | instead of Union
+    "UP008",  # Use | None instead of Optional
+    "UP009",  # Use collections.abc instead of typing
+    "UP035",  # Remove redundant unions
+]
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["cycleformers"]
+
+[tool.ruff.format]
+# Same as Transformers.
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.per-file-ignores]
+# Ignore import violations in all `__init__.py` files.
+"__init__.py" = ["F401"]
+
+[[tool.mypy.overrides]]
+module = "accelerate.*,datasets.*,transformers.*"
+ignore_missing_imports = true
+
+[tool.pytest]
+markers = [
+    "slow: mark test as slow to run",
+    "meta: mark test as testing fixtures or helper functions"
+]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
