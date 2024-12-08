@@ -8,12 +8,12 @@ on:
 jobs:
   doctest:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.11', '3.12', '3.13']
-
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
       
       - name: Install Poetry
         run: |
@@ -21,14 +21,12 @@ jobs:
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
       
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'poetry'
-      
       - name: Install dependencies
-        run: poetry install
+        run: |
+          poetry env list
+          poetry env use $(which python3)
+          poetry env list
+          poetry install
       
       - name: Run doctests
         run: poetry run python -m doctest **/*.py
@@ -48,7 +46,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: 3.11
           cache: 'poetry'
       
       - name: Install dependencies
