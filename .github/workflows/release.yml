@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/cycleformers/
+      url: https://pypi.org/project/cycleformers
     permissions:
       id-token: write
 
@@ -77,8 +77,8 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write
       id-token: write
+      contents: write
 
     steps:
       - name: Download all the dists
