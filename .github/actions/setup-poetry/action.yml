@@ -1,0 +1,26 @@
+name: 'Set up Poetry and install'
+description: 'Set up a specific version of Poetry and install dependencies using caching.'
+inputs:
+  python-version:
+    description: "Version range or exact version of Python or PyPy to use, using SemVer's version range syntax."
+    default: 3.11
+  install-dependencies:
+    description: "If true, dependencies will be installed."
+    default: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install poetry
+      run: pipx install poetry==1.8.3
+      shell: bash
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: 'poetry'
+
+    - name: Install dependencies
+      if: ${{ inputs.install-dependencies }}
+      run: poetry install --all-extras
+      shell: bash

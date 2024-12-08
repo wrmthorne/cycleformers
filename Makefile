@@ -10,7 +10,7 @@ PROJECT_VERSION ?= v$(shell poetry version -s)
 PYTHON_VERSION ?= 3.11
 .DEFAULT_GOAL := all
 
-.PHONY: init-env init check-toml lint-src format lint audit test all clean info build-docs
+.PHONY: init-env init check-toml lint-src format lint quality audit test all clean info build-docs
 
 init-env:
 	@if [ ! -f .env ]; then \
@@ -42,6 +42,11 @@ format: -check-toml -reformat-src
 
 lint: -lint-src
 
+quality: 
+	@poetry run python -c "from cycleformers import *" || (echo "Import failure. Unprotected import?"; exit 1)
+	@make format
+	@make lint
+
 audit:
 	poetry run bandit -r $(SOURCE_DIR) -x $(TEST_DIR)
 
@@ -51,7 +56,7 @@ test:
 build-docs:
 	poetry run mkdocs build
 
-all: format lint audit test build-docs
+all: audit quality test build-docs
 
 clean:
 	rm -rf dist/
