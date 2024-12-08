@@ -1,0 +1,31 @@
+name: Code quality checks & tests
+on:
+  workflow_call:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.11, 3.12]
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: ./.github/actions/setup-poetry
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Cheapest check first
+      - name: Run audit
+        run: make audit
+
+      - name: Run quality checks
+        run: make quality
+
+      - name: Run doctests
+        run: poetry run python -m doctest **/*.py
+
+      - name: Run tests
+        run:
+          poetry run pytest --all

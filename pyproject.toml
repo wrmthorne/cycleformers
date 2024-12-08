@@ -23,6 +23,8 @@ pytest = "^8.3.3"
 pre-commit = "^4.0.1"
 ruff = "^0.7.1"
 mypy = "^1.13.0"
+semantic-release = "^0.1.0"
+pytest-cov = "^6.0.0"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
@@ -108,6 +110,16 @@ markers = [
     "slow: mark test as slow to run",
     "meta: mark test as testing fixtures or helper functions"
 ]
+
+[tool.semantic_release]
+version_variable = [
+    "src/cycleformers/__init__.py",
+    "pyproject.toml:version",
+]
+
+parser_angular_allowed_types = "build, chore, ci, docs, feat, fix, perf, style, refactor, test"
+parser_angular_minor_types = "feat"
+parser_angular_patch_types = "fix, perf"
 
 [build-system]
 requires = ["poetry-core"]

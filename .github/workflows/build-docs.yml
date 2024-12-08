@@ -2,58 +2,25 @@ name: Build Documentation
 
 on:
   workflow_call:
-  workflow_dispatch:
-  
+    inputs:
+      deploy:
+        type: boolean
+        description: "If true, the docs will be deployed."
+        default: false  
 
 jobs:
-  doctest:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-      
-      - name: Install Poetry
-        run: |
-          pipx install poetry
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-      
-      - name: Install dependencies
-        run: |
-          poetry env list
-          poetry env use $(which python3)
-          poetry env list
-          poetry install
-      
-      - name: Run doctests
-        run: poetry run python -m doctest **/*.py
-
   build-docs:
-    needs: doctest
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Poetry
-        run: |
-          pipx install poetry
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: ./.github/actions/setup-poetry
         with:
           python-version: 3.11
-          cache: 'poetry'
       
-      - name: Install dependencies
-        run: poetry install --only docs
-        shell: bash
-      
-      - name: Build & deploy documentation
+      - name: Build & maybe deploy documentation
         run: |
           poetry run mkdocs build --verbose --clean
-          poetry run mkdocs gh-deploy --force
+          if ${{ inputs.deploy }}; then
+            poetry run mkdocs gh-deploy --force
+          fi

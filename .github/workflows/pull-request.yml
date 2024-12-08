@@ -5,94 +5,19 @@ on:
     branches:
       - main
 
+permissions:
+  pull-requests: read
+
 jobs:
-  format:
+  check-pr-title:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-      - name: Setup Poetry
-        run: |
-          pip install poetry
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-      - name: Install dependencies from cache
-        id: poetry-cache
-        uses: actions/cache@v3
-        with:
-          path: .venv
-          key: poetry-ci-dependencies-${{ hashFiles('**/poetry.lock') }}
-      - name: Install dependencies
-        run: poetry install --no-interaction --no-root
-        if: steps.poetry-cache.outputs.cache-hit != 'true'
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Formatting
-        run: |
-          make format
+  checks:
+    uses: ./.github/workflows/checks.yml
 
-  lint-source:
-    needs: format
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-      - name: Setup Poetry
-        run: |
-          pip install poetry
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-      - name: Install dependencies from cache
-        id: poetry-cache
-        uses: actions/cache@v3
-        with:
-          path: .venv
-          key: poetry-ci-dependencies-${{ hashFiles('**/poetry.lock') }}
-      - name: Install dependencies
-        run: poetry install --no-interaction --no-root
-        if: steps.poetry-cache.outputs.cache-hit != 'true'
-
-      - name: Linting
-        run: |
-          make lint
-
-  tests:
-    needs: format
-    uses: ./.github/workflows/test.yml
-    with:
-      test-args: '--all'
-
-  audit:
-    needs:
-      - format
-      - tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-      - name: Setup Poetry
-        run: | 
-          pip install poetry
-          poetry config virtualenvs.create true
-          poetry config virtualenvs.in-project true
-      - name: Install dependencies from cache
-        id: poetry-cache
-        uses: actions/cache@v3
-        with:
-          path: .venv
-          key: poetry-ci-dependencies-${{ hashFiles('**/poetry.lock') }}
-      - name: Install dependencies
-        run: poetry install --no-interaction --no-root
-        if: steps.poetry-cache.outputs.cache-hit != 'true'
-
-      - name: Run audit
-        run: |
-          make audit
+  build-docs:
+    uses: ./.github/workflows/build-docs.yml
