@@ -1,3 +1,5 @@
+__version__ = "0.1.0"
+
 from .cycle_trainer import CycleTrainer
 from .cycle_training_arguments import CycleTrainingArguments
 from .data_config import DataConfig
