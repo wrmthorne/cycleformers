@@ -29,7 +29,7 @@ from transformers.trainer_callback import (
 from transformers.trainer_utils import TrainOutput
 
 from .cycle_training_arguments import CycleTrainingArguments
-from .utils import auto_temp_attributes
+from .utils import DEFAULT_SEP_SEQ, auto_temp_attributes
 
 
 class CycleTrainer(Trainer):
@@ -143,6 +143,9 @@ class CycleTrainer(Trainer):
             self.data_collator_B = DataCollatorForSeq2Seq(tokenizer_B)
         elif data_collator_B is None:
             self.data_collator_B = DataCollatorWithPadding(tokenizer_B)
+
+        # TODO: Expose through config
+        self.sep_seq = DEFAULT_SEP_SEQ
 
         # TODO: Separate our train and eval if we support multiple eval datasets
         for dataset, tokenizer, model, attr_name in [
@@ -263,7 +266,9 @@ class CycleTrainer(Trainer):
 
         def tokenize(element):
             outputs = processing_class(
-                element[text_column] if formatting_func is None else formatting_func(element),
+                [text + self.sep_seq for text in element[text_column]]
+                if formatting_func is None
+                else formatting_func(element),
                 add_special_tokens=add_special_tokens,
                 truncation=True,
                 padding=False,
@@ -276,7 +281,6 @@ class CycleTrainer(Trainer):
                 raise ValueError(
                     "The `formatting_func` should return a list of processed strings since it can lead to silent bugs."
                 )
-
             return {"input_ids": outputs["input_ids"], "attention_mask": outputs["attention_mask"]}
 
         signature_columns = ["input_ids", "labels", "attention_mask"]
@@ -302,7 +306,7 @@ class CycleTrainer(Trainer):
         }
 
         if isinstance(dataset, datasets.Dataset):
-            map_kwargs["num_proc"] = 4  # FIXME: self.dataset_num_proc  # this arg is not available for IterableDataset
+            map_kwargs["num_proc"] = 1  # FIXME: self.dataset_num_proc  # this arg is not available for IterableDataset
         tokenized_dataset = dataset.map(tokenize, **map_kwargs)
 
         return tokenized_dataset
@@ -534,8 +538,8 @@ class CycleTrainer(Trainer):
 
             # Update if needed
             if (idx + 1) % self.args.gradient_accumulation_steps == 0:
-                metrics[f"train_loss_{cycle_name}"] = loss.detach().float().item()
-                metrics[f"learning_rate_{cycle_name}"] = optimizer.param_groups[0]["lr"]
+                metrics[f"train_loss_{cycle_name}"] = loss.detach().float().cpu().item()
+                metrics[f"learning_rate_{cycle_name}"] = optimizer.param_groups[0]["lr"].cpu()
                 optimizer.step()
                 optimizer.zero_grad()
                 scheduler.step()
@@ -545,6 +549,24 @@ class CycleTrainer(Trainer):
         torch.cuda.empty_cache()
 
         return metrics
+
+    def shift_padding_right(self, tensor, pad_id=0):
+        # Count number of non-pad tokens per row
+        nonpad_counts = (tensor != pad_id).sum(dim=1)
+
+        # Create indices tensor for scattering
+        seq_length = tensor.size(1)
+        device = tensor.device
+        indices = torch.arange(seq_length, device=device).unsqueeze(0).expand_as(tensor)
+
+        # Modify indices to achieve right padding
+        adjusted_indices = (indices - nonpad_counts.unsqueeze(1)) % seq_length
+
+        # Scatter the tensor according to new indices
+        result = torch.zeros_like(tensor)
+        result.scatter_(1, adjusted_indices, tensor)
+
+        return result
 
     def _cycle_prepare_inputs(
         self, real_input_ids, synth_input_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name
@@ -559,14 +581,15 @@ class CycleTrainer(Trainer):
             synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1] :]
 
         # TODO: Skip retokenization if tokenizers are identical
-        synth_batch_text = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
+        synth_batch_responses = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
 
         if not model_train.config.is_encoder_decoder:
             input_texts = tokenizer_train.batch_decode(real_input_ids, skip_special_tokens=True)
             # TODO: Investigate tokenizer_train.eos_token as separator to appear more like packed training instances
             # TODO: Potentially add a configurable templating function here
             synth_batch_text = [
-                synth_text + "\n\n" + input_text for synth_text, input_text in zip(synth_batch_text, input_texts)
+                synth_text + self.sep_seq + input_text.strip(self.sep_seq) + tokenizer_train.eos_token
+                for synth_text, input_text in zip(synth_batch_responses, input_texts)
             ]
 
         # Temporarily call padding_side in tokenizer to ensure position ids are correct for loss calculation
@@ -579,9 +602,19 @@ class CycleTrainer(Trainer):
 
         # Everything up to -real_input_ids.shape[-1] is the prompt therefore -100
         synth_batch["labels"] = synth_batch["input_ids"].clone()
-        synth_batch["labels"][
-            :, : -real_input_ids.shape[-1]
-        ] = -100  # TODO: Make sure this doesn't include leasing whitespace
+        synth_batch["labels"][synth_batch["attention_mask"] == 0] = -100  # Careful not to set eos token as -100
+
+        # FIXME: Temporary solution to fix incorrect labelling - come back and
+        # implement a more efficient solution
+        if not model_train.config.is_encoder_decoder:
+            prompt_mask = torch.zeros_like(synth_batch["input_ids"])
+            for i, text in enumerate(synth_batch_responses):
+                prompt_len = tokenizer_train(text + self.sep_seq, return_tensors="pt", padding=False).input_ids.shape[
+                    -1
+                ]
+                prompt_mask[i, :prompt_len] = 1
+
+            synth_batch["labels"][prompt_mask == 1] = -100
 
         return synth_batch
 
