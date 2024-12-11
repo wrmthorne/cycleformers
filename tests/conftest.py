@@ -30,7 +30,7 @@ def pytest_collection_modifyitems(config, items):
 # TODO: add config tests for other architectures
 @dataclass
 class Seq2SeqModelTestConfig:
-    model_name_or_path: str = "google/t5-efficient-tiny"
+    model_name_or_path: str = "google/flan-t5-small"
 
 
 @dataclass
