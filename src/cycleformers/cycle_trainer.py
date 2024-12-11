@@ -2,6 +2,7 @@ import math
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
+from copy import copy
 from pathlib import Path
 
 import datasets
@@ -581,15 +582,16 @@ class CycleTrainer(Trainer):
             synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1] :]
 
         # TODO: Skip retokenization if tokenizers are identical
-        synth_batch_responses = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
+        synth_batch_text = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
 
         if not model_train.config.is_encoder_decoder:
             input_texts = tokenizer_train.batch_decode(real_input_ids, skip_special_tokens=True)
             # TODO: Investigate tokenizer_train.eos_token as separator to appear more like packed training instances
             # TODO: Potentially add a configurable templating function here
+            synth_batch_responses = copy(synth_batch_text)
             synth_batch_text = [
                 synth_text + self.sep_seq + input_text.strip(self.sep_seq) + tokenizer_train.eos_token
-                for synth_text, input_text in zip(synth_batch_responses, input_texts)
+                for synth_text, input_text in zip(synth_batch_text, input_texts)
             ]
 
         # Temporarily call padding_side in tokenizer to ensure position ids are correct for loss calculation
@@ -600,20 +602,23 @@ class CycleTrainer(Trainer):
             padding_side="right" if not model_train.config.is_encoder_decoder else tokenizer_train.padding_side,
         )
 
-        # Everything up to -real_input_ids.shape[-1] is the prompt therefore -100
-        synth_batch["labels"] = synth_batch["input_ids"].clone()
-        synth_batch["labels"][synth_batch["attention_mask"] == 0] = -100  # Careful not to set eos token as -100
+        # Seq2seq just needs the real input ids as labels
+        synth_batch["labels"] = real_input_ids
 
         # FIXME: Temporary solution to fix incorrect labelling - come back and
         # implement a more efficient solution
         if not model_train.config.is_encoder_decoder:
             prompt_mask = torch.zeros_like(synth_batch["input_ids"])
             for i, text in enumerate(synth_batch_responses):
-                prompt_len = tokenizer_train(text + self.sep_seq, return_tensors="pt", padding=False).input_ids.shape[
-                    -1
-                ]
+                prompt_len = tokenizer_train(
+                    text + self.sep_seq,
+                    return_tensors="pt",
+                    padding=False,
+                ).input_ids.shape[-1]
                 prompt_mask[i, :prompt_len] = 1
 
+            synth_batch["labels"] = synth_batch["input_ids"].clone()  # Careful not to set eos token as -100
+            synth_batch["labels"][synth_batch["attention_mask"] == 0] = -100
             synth_batch["labels"][prompt_mask == 1] = -100
 
         return synth_batch
