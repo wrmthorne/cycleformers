@@ -85,7 +85,7 @@ class TestCyclePrepareInputs:
     def fixture_cycle_trainer(self):
         trainer = Mock(spec=CycleTrainer)
         # Copy the real method to our mock
-        trainer._cycle_prepare_inputs = CycleTrainer._cycle_prepare_inputs.__get__(trainer)
+        trainer._cycle_prepare_inputs = CycleTrainer._prepare_cycle_inputs.__get__(trainer)
         trainer.sep_seq = DEFAULT_SEP_SEQ
         return trainer
 
