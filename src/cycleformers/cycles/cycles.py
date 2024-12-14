@@ -5,7 +5,22 @@ from transformers.tokenization_utils_base import BatchEncoding, PreTrainedTokeni
 from cycleformers.utils import DEFAULT_SEP_SEQ
 
 
+def prepare_seq2seq_cycle_inputs(
+    self,
+    real_input_ids: torch.Tensor,
+    synth_input_ids: torch.Tensor,
+    model_gen: nn.Module,
+    model_train: nn.Module,
+    tokenizer_gen: PreTrainedTokenizerBase,
+    tokenizer_train: PreTrainedTokenizerBase,
+    cycle_name: str,
+) -> BatchEncoding | dict[str, torch.Tensor]:
+    """Prepare input sequences for seq2seq language models."""
+    raise NotImplementedError("Too much effort for very little gain at this point")
+
+
 def prepare_causal_skip_cycle_inputs(
+    self,
     real_input_ids: torch.Tensor,
     synth_input_ids: torch.Tensor,
     model_gen: nn.Module,
@@ -24,7 +39,7 @@ def prepare_causal_skip_cycle_inputs(
     This function accepts the prompt and the generated response along with the relevant models and tokenizers.
     We need to broadly do the following:
     1) Move the generated tokens to be the prompt and the prompt to be the response
-    2) Ensure that any separating text/sequence is moved to the end of the new prompt
+    2) Ensure that any separating text/sequence is moved to the end of the new prompt and before the response
     3) Shift all padding tokens to the right
     4) Create attention masks and labels, handling EOS tokens properly when the pad token is the same as the eos token
 
@@ -59,8 +74,10 @@ def prepare_causal_skip_cycle_inputs(
         >>> output['labels'].shape
         torch.Size([1, 7])
     """
-    SEQ_SEQ_IDS = tokenizer_gen.encode(DEFAULT_SEP_SEQ)[0]
-    SEP_SEQ_LEN = len(SEQ_SEQ_IDS)
+    SEP_SEQ_IDS = tokenizer_gen.encode(DEFAULT_SEP_SEQ, padding=False)
+    if SEP_SEQ_IDS[0] == tokenizer_gen.bos_token_id:
+        SEP_SEQ_IDS = SEP_SEQ_IDS[1:]
+    SEP_SEQ_LEN = len(SEP_SEQ_IDS)
     PROMPT_WIDTH = real_input_ids.shape[1]
     BATCH_SIZE, SEQ_LEN = synth_input_ids.shape
     INPUTS_WIDTH = PROMPT_WIDTH - SEP_SEQ_LEN
@@ -108,7 +125,7 @@ def prepare_causal_skip_cycle_inputs(
     labels = torch.full_like(synth_input_ids, -100, device=device)
     special_mask[:, INPUTS_WIDTH:] = False
     labels.scatter_(1, indices * special_mask, synth_input_ids * special_mask)
-    labels[:, 0] = -100
+    labels[:, 0] = -100  # TODO: Need to understand why col 0 won't stay as -100
     labels[eos_idxs[:, 0], eos_idxs[:, 1]] = tokenizer_gen.eos_token_id
 
     # Clear video memory
@@ -118,7 +135,7 @@ def prepare_causal_skip_cycle_inputs(
         PROMPT_WIDTH,
         INPUTS_WIDTH,
         SEP_SEQ_LEN,
-        SEQ_SEQ_IDS,
+        SEP_SEQ_IDS,
         special_mask,
         prompt_lens,
         response_lens,
@@ -129,4 +146,4 @@ def prepare_causal_skip_cycle_inputs(
     )
     torch.cuda.empty_cache()
 
-    return {"input_ids": input_ids, "attention_mask": attn_mask, "labels": labels}
+    return {"input_ids": input_ids, "attention_mask": attn_mask.to(torch.int64), "labels": labels}

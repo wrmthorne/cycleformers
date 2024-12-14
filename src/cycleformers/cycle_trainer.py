@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import DataCollatorForSeq2Seq, DataCollatorWithPadding, PreTrainedTokenizerBase, Trainer
 from transformers.integrations import get_reporting_integration_callbacks
+from transformers.tokenization_utils_base import BatchEncoding
 from transformers.trainer import (
     DEFAULT_CALLBACKS,
     DEFAULT_PROGRESS_CALLBACK,
@@ -56,7 +57,7 @@ class CycleTrainer(Trainer):
                 raise ValueError("When using peft_configs, models should be a single model, not a dictionary")
             self.model_A = models["A"]
             self.model_B = models["B"]
-            self.is_peft_model = False
+            self.is_peft_model = True
         elif isinstance(models, PeftModel):
             adapter_names = list(models.peft_config)
             if "A" in adapter_names and "B" in adapter_names:
@@ -103,6 +104,10 @@ class CycleTrainer(Trainer):
                 raise ValueError(
                     f"peft_configs must be a PeftConfig or dict[str, PeftConfig], got {type(peft_configs)}"
                 )
+        else:
+            # TODO: Should this be allowed?
+            self.model_A = self.model_B = models
+            self.is_peft_model = False
 
         # Store adapter names for convenience
         self.adapter_A = "A" if self.is_peft_model else None
@@ -163,6 +168,7 @@ class CycleTrainer(Trainer):
                     text_column="text",
                     max_seq_length=None,
                     remove_unused_columns=True,
+                    is_encoder_decoder=model.config.is_encoder_decoder,
                     formatting_func=None,
                     add_special_tokens=True,
                     skip_prepare_dataset=False,
@@ -230,6 +236,7 @@ class CycleTrainer(Trainer):
         text_column,
         max_seq_length,
         remove_unused_columns,
+        is_encoder_decoder,
         formatting_func: Callable | None = None,
         add_special_tokens=True,
         skip_prepare_dataset=False,
@@ -266,10 +273,15 @@ class CycleTrainer(Trainer):
             return dataset
 
         def tokenize(element):
+            if formatting_func is None and not is_encoder_decoder:
+                texts = [text + self.sep_seq for text in element[text_column]]
+            elif formatting_func is None and is_encoder_decoder:
+                texts = element[text_column]
+            else:
+                texts = formatting_func(element)
+
             outputs = processing_class(
-                [text + self.sep_seq for text in element[text_column]]
-                if formatting_func is None
-                else formatting_func(element),
+                texts,
                 add_special_tokens=add_special_tokens,
                 truncation=True,
                 padding=False,
@@ -282,6 +294,7 @@ class CycleTrainer(Trainer):
                 raise ValueError(
                     "The `formatting_func` should return a list of processed strings since it can lead to silent bugs."
                 )
+            del texts
             return {"input_ids": outputs["input_ids"], "attention_mask": outputs["attention_mask"]}
 
         signature_columns = ["input_ids", "labels", "attention_mask"]
@@ -526,7 +539,7 @@ class CycleTrainer(Trainer):
                 )
 
         # Prepare inputs using generated text
-        synth_batch = self._cycle_prepare_inputs(
+        synth_batch = self._prepare_cycle_inputs(
             batch["input_ids"], synth_batch_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name
         )
         synth_batch = {k: v.to(self.accelerator.device) for k, v in synth_batch.items()}
@@ -546,7 +559,7 @@ class CycleTrainer(Trainer):
                 scheduler.step()
 
         # Cleanup
-        del synth_batch, synth_batch_ids
+        del synth_batch, synth_batch_ids, loss, outputs
         torch.cuda.empty_cache()
 
         return metrics
@@ -569,14 +582,23 @@ class CycleTrainer(Trainer):
 
         return result
 
-    def _cycle_prepare_inputs(
-        self, real_input_ids, synth_input_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name
-    ):
-        """Scenarios that need testing:
-        1) Order of inputs is correct
-        2) No inputs have been truncated in any way
-        3) -100 is set for everything except the real_input_ids
-        4) Attention mask correctly accounts for padding
+    def _prepare_cycle_inputs(
+        self,
+        real_input_ids: torch.Tensor,
+        synth_input_ids: torch.Tensor,
+        model_gen: nn.Module,
+        model_train: nn.Module,
+        tokenizer_gen: PreTrainedTokenizerBase,
+        tokenizer_train: PreTrainedTokenizerBase,
+        cycle_name: str,
+    ) -> BatchEncoding:
+        """
+        Handlle the outputs of the generative model ready for the training model. In the case of seq2seq, simply
+        use the real input ids as labels and the synth input ids as input. For causal, we need to split the prompt
+        from the response, clean the prompt, swap the order, add any separator tokens we want and then right pad.
+
+        Subclass and override this method to implement custom logic. The method should return a BatchEncoding object
+        or equivalent dict with input_ids, attention_mask and labels.
         """
         if not model_gen.config.is_encoder_decoder:
             synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1] :]
@@ -618,8 +640,7 @@ class CycleTrainer(Trainer):
                 prompt_mask[i, :prompt_len] = 1
 
             synth_batch["labels"] = synth_batch["input_ids"].clone()  # Careful not to set eos token as -100
-            synth_batch["labels"][synth_batch["attention_mask"] == 0] = -100
-            synth_batch["labels"][prompt_mask == 1] = -100
+            synth_batch["labels"][(synth_batch["attention_mask"] == 0) | (prompt_mask == 1)] = -100
 
         return synth_batch
 
