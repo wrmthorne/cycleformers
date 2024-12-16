@@ -486,6 +486,16 @@ class CycleTrainer(Trainer):
 
                 # Update state and check control flow
                 self.state.global_step += 1
+
+                # Add save strategy handling here
+                if self.args.save_strategy == "steps":
+                    if self.state.global_step % self.state.save_steps == 0:
+                        self.control.should_save = True
+                elif self.args.save_strategy == "epoch":
+                    # Save at the end of epoch
+                    if idx == len(self.train_dataloader_A) - 1:
+                        self.control.should_save = True
+
                 self.control = self.callback_handler.on_step_end(args, self.state, self.control)
 
                 # Handle logging
@@ -500,7 +510,8 @@ class CycleTrainer(Trainer):
 
                 # Handle saving
                 if self.control.should_save:
-                    self.control = self.callback_handler.on_save(args, self.state, self.control)
+                    self._save_checkpoint(self.model_A)  # We only need to pass one model
+                    self.control.should_save = False  # Reset the flag after saving
 
             self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import torch
 from datasets import Dataset
 from peft import LoraConfig, get_peft_model
 from torch.optim import AdamW
@@ -21,6 +22,11 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "slow" in item.keywords and not config.getoption("--slow"):
                 item.add_marker(skip_slow)
+    if not torch.cuda.is_available():
+        skip_gpu = pytest.mark.skip(reason="No GPU available")
+        for item in items:
+            if "requires_gpu" in item.keywords:
+                item.add_marker(skip_gpu)
 
 
 # TODO: replace with tiny-random-model

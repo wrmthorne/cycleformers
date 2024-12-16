@@ -48,6 +48,8 @@ def tmp_dir():
         yield tmp_dir
 
 
+@pytest.mark.slow
+@pytest.mark.requires_gpu
 @pytest.mark.parametrize("example_script", ["cycle_ner/train.py"])
 @pytest.mark.parametrize(
     "config_yaml",
@@ -67,7 +69,10 @@ def test_cycle_ner(example_script, config_yaml, tmp_dir):
     with open(yaml_file, "w") as f:
         yaml.dump(config, f)
 
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__)
+    while project_root.name != "cycleformers":
+        project_root = project_root.parent
+
     command = f"python {project_root}/examples/{example_script} {yaml_file}"
 
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
