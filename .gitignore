@@ -20,3 +20,4 @@ site/
 wandb/
 examples/**/data/
 misc/
+benchmark_results/

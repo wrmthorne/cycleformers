@@ -3,6 +3,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
+from types import MethodType
 
 import datasets
 import torch
@@ -13,6 +14,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import DataCollatorForSeq2Seq, DataCollatorWithPadding, PreTrainedTokenizerBase, Trainer
 from transformers.integrations import get_reporting_integration_callbacks
+from transformers.tokenization_utils_base import BatchEncoding
 from transformers.trainer import (
     DEFAULT_CALLBACKS,
     DEFAULT_PROGRESS_CALLBACK,
@@ -29,7 +31,8 @@ from transformers.trainer_callback import (
 from transformers.trainer_utils import TrainOutput
 
 from .cycle_training_arguments import CycleTrainingArguments
-from .utils import auto_temp_attributes
+from .cycles import PrepareCycleInputsNotSet, _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
+from .utils import DEFAULT_SEP_SEQ, auto_temp_attributes
 
 
 class CycleTrainer(Trainer):
@@ -102,6 +105,10 @@ class CycleTrainer(Trainer):
                 raise ValueError(
                     f"peft_configs must be a PeftConfig or dict[str, PeftConfig], got {type(peft_configs)}"
                 )
+        else:
+            # TODO: Should this be allowed?
+            self.model_A = self.model_B = models
+            self.is_peft_model = False
 
         # Store adapter names for convenience
         self.adapter_A = "A" if self.is_peft_model else None
@@ -144,6 +151,9 @@ class CycleTrainer(Trainer):
         elif data_collator_B is None:
             self.data_collator_B = DataCollatorWithPadding(tokenizer_B)
 
+        # TODO: Expose through config
+        self.sep_seq = DEFAULT_SEP_SEQ
+
         # TODO: Separate our train and eval if we support multiple eval datasets
         for dataset, tokenizer, model, attr_name in [
             (train_dataset_A, self.tokenizer_A, self.model_A, "train_dataset_A"),
@@ -159,6 +169,7 @@ class CycleTrainer(Trainer):
                     text_column="text",
                     max_seq_length=None,
                     remove_unused_columns=True,
+                    is_encoder_decoder=model.config.is_encoder_decoder,
                     formatting_func=None,
                     add_special_tokens=True,
                     skip_prepare_dataset=False,
@@ -219,6 +230,8 @@ class CycleTrainer(Trainer):
             ],
         )
 
+        self.set_cycle_inputs_fn()
+
     def _prepare_dataset(
         self,
         dataset,
@@ -226,6 +239,7 @@ class CycleTrainer(Trainer):
         text_column,
         max_seq_length,
         remove_unused_columns,
+        is_encoder_decoder,
         formatting_func: Callable | None = None,
         add_special_tokens=True,
         skip_prepare_dataset=False,
@@ -262,8 +276,15 @@ class CycleTrainer(Trainer):
             return dataset
 
         def tokenize(element):
+            if formatting_func is None and not is_encoder_decoder:
+                texts = [text + self.sep_seq for text in element[text_column]]
+            elif formatting_func is None and is_encoder_decoder:
+                texts = element[text_column]
+            else:
+                texts = formatting_func(element)
+
             outputs = processing_class(
-                element[text_column] if formatting_func is None else formatting_func(element),
+                texts,
                 add_special_tokens=add_special_tokens,
                 truncation=True,
                 padding=False,
@@ -276,7 +297,7 @@ class CycleTrainer(Trainer):
                 raise ValueError(
                     "The `formatting_func` should return a list of processed strings since it can lead to silent bugs."
                 )
-
+            del texts
             return {"input_ids": outputs["input_ids"], "attention_mask": outputs["attention_mask"]}
 
         signature_columns = ["input_ids", "labels", "attention_mask"]
@@ -302,7 +323,7 @@ class CycleTrainer(Trainer):
         }
 
         if isinstance(dataset, datasets.Dataset):
-            map_kwargs["num_proc"] = 4  # FIXME: self.dataset_num_proc  # this arg is not available for IterableDataset
+            map_kwargs["num_proc"] = 1  # FIXME: self.dataset_num_proc  # this arg is not available for IterableDataset
         tokenized_dataset = dataset.map(tokenize, **map_kwargs)
 
         return tokenized_dataset
@@ -521,7 +542,7 @@ class CycleTrainer(Trainer):
                 )
 
         # Prepare inputs using generated text
-        synth_batch = self._cycle_prepare_inputs(
+        synth_batch = self._prepare_cycle_inputs(
             batch["input_ids"], synth_batch_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name
         )
         synth_batch = {k: v.to(self.accelerator.device) for k, v in synth_batch.items()}
@@ -534,56 +555,64 @@ class CycleTrainer(Trainer):
 
             # Update if needed
             if (idx + 1) % self.args.gradient_accumulation_steps == 0:
-                metrics[f"train_loss_{cycle_name}"] = loss.detach().float().item()
-                metrics[f"learning_rate_{cycle_name}"] = optimizer.param_groups[0]["lr"]
+                metrics[f"train_loss_{cycle_name}"] = loss.detach().float().cpu().item()
+                metrics[f"learning_rate_{cycle_name}"] = optimizer.param_groups[0]["lr"].cpu()
                 optimizer.step()
                 optimizer.zero_grad()
                 scheduler.step()
 
         # Cleanup
-        del synth_batch, synth_batch_ids
+        del synth_batch, synth_batch_ids, loss, outputs
         torch.cuda.empty_cache()
 
         return metrics
 
-    def _cycle_prepare_inputs(
-        self, real_input_ids, synth_input_ids, model_gen, model_train, tokenizer_gen, tokenizer_train, cycle_name
-    ):
-        """Scenarios that need testing:
-        1) Order of inputs is correct
-        2) No inputs have been truncated in any way
-        3) -100 is set for everything except the real_input_ids
-        4) Attention mask correctly accounts for padding
+    def set_cycle_inputs_fn(self, fn: Callable | None = None):
         """
-        if not model_gen.config.is_encoder_decoder:
-            synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1] :]
+        Setter method to control which mid cycle token preparation method to use from cycleformers.cycles
 
-        # TODO: Skip retokenization if tokenizers are identical
-        synth_batch_text = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
+        Method is called during class init but may be called by user post instantiation to force specific behaviour
+        without subclassing. If no arg is passed, this method will automatically select the best optimised method
+        for the given conditions.
+        """
+        try:
+            # User provided method
+            if fn is not None:
+                bound_method = MethodType(fn, self)
+            # TODO: Add better tokenizer equality check
+            # Both causal models that share a tokenizer from a tested model family
+            elif (
+                self.tokenizer_A == self.tokenizer_B
+                and not self.model_A.config.is_encoder_decoder
+                and not self.model_B.config.is_encoder_decoder
+            ):
+                bound_method = MethodType(_prepare_causal_skip_cycle_inputs, self)
+            else:
+                bound_method = MethodType(_default_prepare_cycle_inputs, self)
 
-        if not model_train.config.is_encoder_decoder:
-            input_texts = tokenizer_train.batch_decode(real_input_ids, skip_special_tokens=True)
-            # TODO: Investigate tokenizer_train.eos_token as separator to appear more like packed training instances
-            # TODO: Potentially add a configurable templating function here
-            synth_batch_text = [
-                synth_text + "\n\n" + input_text for synth_text, input_text in zip(synth_batch_text, input_texts)
-            ]
+            setattr(self, "_prepare_cycle_inputs", bound_method)
+        except Exception as e:
+            raise PrepareCycleInputsNotSet(f"Failed to set prepare_cycle_inputs: {e}")
 
-        # Temporarily call padding_side in tokenizer to ensure position ids are correct for loss calculation
-        synth_batch = tokenizer_train(
-            synth_batch_text,
-            return_tensors="pt",
-            padding=True,
-            padding_side="right" if not model_train.config.is_encoder_decoder else tokenizer_train.padding_side,
-        )
+    def _prepare_cycle_inputs(
+        self,
+        real_input_ids: torch.Tensor,
+        synth_input_ids: torch.Tensor,
+        model_gen: nn.Module,
+        model_train: nn.Module,
+        tokenizer_gen: PreTrainedTokenizerBase,
+        tokenizer_train: PreTrainedTokenizerBase,
+        cycle_name: str,
+    ) -> BatchEncoding:
+        """
+        Handlle the outputs of the generative model ready for the training model. In the case of seq2seq, simply
+        use the real input ids as labels and the synth input ids as input. For causal, we need to split the prompt
+        from the response, clean the prompt, swap the order, add any separator tokens we want and then right pad.
 
-        # Everything up to -real_input_ids.shape[-1] is the prompt therefore -100
-        synth_batch["labels"] = synth_batch["input_ids"].clone()
-        synth_batch["labels"][
-            :, : -real_input_ids.shape[-1]
-        ] = -100  # TODO: Make sure this doesn't include leasing whitespace
-
-        return synth_batch
+        Subclass and override this method to implement custom logic. The method should return a BatchEncoding object
+        or equivalent dict with input_ids, attention_mask and labels.
+        """
+        raise PrepareCycleInputsNotSet()
 
     def evaluate(self, ignore_keys=None):
         metrics = {}

@@ -6,6 +6,9 @@ from typing import Any, Protocol, TypeVar, cast, get_type_hints
 from peft import LoraConfig
 
 
+DEFAULT_SEP_SEQ = "\n\n"
+
+
 class DataclassProtocol(Protocol):
     __dataclass_fields__: dict[str, Any]
     __name__: str

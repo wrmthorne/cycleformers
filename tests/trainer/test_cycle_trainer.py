@@ -1,54 +1,192 @@
-from unittest.mock import Mock
+import json
+import shutil
+from pathlib import Path
 
 import pytest
+import torch
 
-from cycleformers import CycleTrainer
+from cycleformers import CycleTrainer, CycleTrainingArguments
+from cycleformers.cycles import _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
 
 
-class TestCyclePrepareInputs:
-    @pytest.fixture(name="real_causal_input_ids")
-    def fixture_real_causal_input_ids(self, causal_tokenizer):
-        """Intentinally jagged to force padding (x10, x6)"""
-        self.real_fst = 10
-        self.real_snd = 6
-        input_ids = causal_tokenizer(["A" * self.real_fst, "A" * self.real_snd], return_tensors="pt", padding=True)[
-            "input_ids"
-        ]
-        return input_ids
+class TestSetCycleInputsFn:
+    def test_set_custom_fn(self, causal_model, causal_tokenizer, text_dataset):
+        def test_fn(self, *args, **kwargs):
+            return args, kwargs
 
-    @pytest.fixture(name="synth_causal_input_ids")
-    def fixture_synth_causal_input_ids(self, causal_tokenizer):
-        """Intentinally jagged to force padding (x8, x10)"""
-        self.synth_fst = 8
-        self.synth_snd = 10
-        input_ids = causal_tokenizer(["B" * self.synth_fst, "B" * self.synth_snd], return_tensors="pt", padding=True)[
-            "input_ids"
-        ]
-        return input_ids
-
-    @pytest.fixture(name="cycle_trainer")
-    def fixture_cycle_trainer(self):
-        trainer = Mock(spec=CycleTrainer)
-        # Copy the real method to our mock
-        trainer._cycle_prepare_inputs = CycleTrainer._cycle_prepare_inputs.__get__(trainer)
-        return trainer
-
-    @pytest.mark.skip(reason="Not implemented")
-    def test_causal_causal_sequence_order(
-        self, real_causal_input_ids, synth_causal_input_ids, cycle_trainer, causal_base_model, causal_tokenizer
-    ):
-        synth_batch = cycle_trainer._cycle_prepare_inputs(
-            real_causal_input_ids,
-            synth_causal_input_ids,
-            causal_base_model,
-            causal_base_model,
-            causal_tokenizer,
-            causal_tokenizer,
-            "a",
+        trainer = CycleTrainer(
+            args=CycleTrainingArguments(output_dir="/tmp/cycleformers_test"),
+            models={"A": causal_model, "B": causal_model},
+            tokenizers=causal_tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
         )
-        assert synth_batch["input_ids"][0].tolist()[: self.synth_fst] == synth_causal_input_ids[0].tolist()
-        assert synth_batch["input_ids"][1].tolist()[: self.synth_snd] == synth_causal_input_ids[1].tolist()
-        assert (
-            synth_batch["input_ids"][0].tolist()[self.synth_fst : self.synth_fst + self.real_fst]
-            == real_causal_input_ids[0].tolist()
+        trainer.set_cycle_inputs_fn(test_fn)
+        assert trainer._prepare_cycle_inputs.__func__ == test_fn
+
+    def test_set_default_causal_skip(self, causal_model, causal_tokenizer, text_dataset):
+        """Both causal models with matching tokenizers"""
+        trainer = CycleTrainer(
+            args=CycleTrainingArguments(output_dir="/tmp/cycleformers_test"),
+            models={"A": causal_model, "B": causal_model},
+            tokenizers=causal_tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
         )
+        trainer.set_cycle_inputs_fn()
+        assert trainer._prepare_cycle_inputs.__func__ == _prepare_causal_skip_cycle_inputs
+
+    def test_set_default_default(self, causal_model, seq2seq_model, causal_tokenizer, seq2seq_tokenizer, text_dataset):
+        """Any other case"""
+        trainer = CycleTrainer(
+            args=CycleTrainingArguments(output_dir="/tmp/cycleformers_test"),
+            models={"A": seq2seq_model, "B": causal_model},
+            tokenizers={"A": seq2seq_tokenizer, "B": causal_tokenizer},
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+        trainer.set_cycle_inputs_fn()
+        assert trainer._prepare_cycle_inputs.__func__ == _default_prepare_cycle_inputs
+
+
+class TestSaveCheckpoint:
+    @pytest.fixture(autouse=True)
+    def setup(self, causal_model, causal_tokenizer, text_dataset):
+        """Setup for each test"""
+        self.save_dir = Path("/tmp/cycleformers_test")
+        if self.save_dir.exists():
+            shutil.rmtree(self.save_dir)
+        self.save_dir.mkdir(parents=True)
+
+        self.args = CycleTrainingArguments(
+            output_dir=str(self.save_dir),
+            per_device_train_batch_size=1,
+            per_device_eval_batch_size=1,
+            num_train_epochs=1,
+            save_strategy="steps",
+            save_steps=len(text_dataset) - 1,
+        )
+
+        self.trainer = CycleTrainer(
+            args=self.args,
+            models={"A": causal_model, "B": causal_model},
+            tokenizers=causal_tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+        yield
+
+        if self.save_dir.exists():
+            shutil.rmtree(self.save_dir)
+
+    def test_lora_adapters_save(self, peft_causal_model, causal_tokenizer, text_dataset):
+        """Test that LoRA adapters are saved correctly"""
+        trainer = CycleTrainer(
+            args=self.args,
+            models=peft_causal_model,
+            tokenizers=causal_tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+        trainer._save_checkpoint(None, None)
+        checkpoint_dir = self.save_dir / "checkpoint-0"
+
+        assert (checkpoint_dir / "A" / "adapter_model.safetensors").exists()
+        assert (checkpoint_dir / "B" / "adapter_model.safetensors").exists()
+        assert (checkpoint_dir / "A" / "adapter_config.json").exists()
+        assert (checkpoint_dir / "B" / "adapter_config.json").exists()
+
+    def test_model_save(self):
+        """Test that models are saved correctly"""
+        self.trainer._save_checkpoint(None, None)
+        checkpoint_dir = self.save_dir / "checkpoint-0"
+
+        assert (checkpoint_dir / "A" / "model.safetensors").exists()
+        assert (checkpoint_dir / "B" / "model.safetensors").exists()
+
+    def test_optimizer_scheduler_save(self):
+        """Test that optimizers and schedulers are saved correctly"""
+        self.trainer._save_checkpoint(None, None)
+        checkpoint_dir = self.save_dir / "checkpoint-0"
+
+        assert (checkpoint_dir / "A" / "optimizer.pt").exists()
+        assert (checkpoint_dir / "B" / "optimizer.pt").exists()
+        assert (checkpoint_dir / "A" / "scheduler.pt").exists()
+        assert (checkpoint_dir / "B" / "scheduler.pt").exists()
+
+    def test_tokenizer_save_separate(self, causal_model, causal_tokenizer, seq2seq_tokenizer, text_dataset):
+        """Test tokenizers are saved separately when different"""
+        trainer = CycleTrainer(
+            args=self.args,
+            models={"A": causal_model, "B": causal_model},
+            tokenizers={"A": causal_tokenizer, "B": seq2seq_tokenizer},
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+        trainer._save_checkpoint(None, None)
+        checkpoint_dir = self.save_dir / "checkpoint-0"
+
+        assert (checkpoint_dir / "A" / "tokenizer_config.json").exists()
+        assert (checkpoint_dir / "B" / "tokenizer_config.json").exists()
+        assert not (checkpoint_dir / "tokenizer_config.json").exists()
+
+    def test_tokenizer_save_shared(self):
+        """Test shared tokenizer is saved in root directory"""
+        self.trainer._save_checkpoint(None, None)
+        checkpoint_dir = self.save_dir / "checkpoint-0"
+
+        assert (checkpoint_dir / "tokenizer_config.json").exists()
+        assert not (checkpoint_dir / "A" / "tokenizer_config.json").exists()
+        assert not (checkpoint_dir / "B" / "tokenizer_config.json").exists()
+
+    def test_rng_state_save(self):
+        """Test that RNG state is saved correctly"""
+        self.trainer._save_checkpoint(self.trainer.model_A)
+        checkpoint_dir = self.save_dir / "checkpoint-0"
+
+        assert (checkpoint_dir / "rng_state.pth").exists()
+
+        rng_state = torch.load(checkpoint_dir / "rng_state.pth", weights_only=False)
+        assert "python" in rng_state
+        assert "numpy" in rng_state
+        assert "cpu" in rng_state
+        if torch.cuda.is_available():
+            assert "cuda" in rng_state
+
+    def test_trainer_state_save(self):
+        """Test that trainer state is saved correctly"""
+        self.trainer._save_checkpoint(self.trainer.model_A)
+        checkpoint_dir = self.save_dir / "checkpoint-0"
+
+        assert (checkpoint_dir / "trainer_state.json").exists()
+
+        with open(checkpoint_dir / "trainer_state.json") as f:
+            state = json.load(f)
+        assert "global_step" in state
+        assert "epoch" in state
+        assert "stateful_callbacks" in state
+
+    def test_save_only_model(self):
+        """Test save_only_model flag"""
+        try:
+            self.trainer.args.save_only_model = True
+            self.trainer._save_checkpoint(self.trainer.model_A)
+            checkpoint_dir = self.save_dir / "checkpoint-0"
+
+            assert (checkpoint_dir / "A" / "model.safetensors").exists()
+            assert (checkpoint_dir / "B" / "model.safetensors").exists()
+
+            assert not (checkpoint_dir / "A" / "optimizer.pt").exists()
+            assert not (checkpoint_dir / "A" / "scheduler.pt").exists()
+            assert not (checkpoint_dir / "B" / "optimizer.pt").exists()
+            assert not (checkpoint_dir / "B" / "scheduler.pt").exists()
+        finally:
+            self.trainer.args.save_only_model = False
+
+    @pytest.mark.skip(reason="Will become relevant when separate model configs are implemented")
+    def test_save_training_args(self):
+        """Test that training arguments are saved correctly"""
+        self.trainer._save_checkpoint(None, None)
+        checkpoint_dir = self.save_dir / "checkpoint-0"
+
+        assert (checkpoint_dir / "training_args.bin").exists()
