@@ -6,6 +6,47 @@ import pytest
 import torch
 
 from cycleformers import CycleTrainer, CycleTrainingArguments
+from cycleformers.cycles import _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
+
+
+class TestSetCycleInputsFn:
+    def test_set_custom_fn(self, causal_model, causal_tokenizer, text_dataset):
+        def test_fn(self, *args, **kwargs):
+            return args, kwargs
+
+        trainer = CycleTrainer(
+            args=CycleTrainingArguments(output_dir="/tmp/cycleformers_test"),
+            models={"A": causal_model, "B": causal_model},
+            tokenizers=causal_tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+        trainer.set_cycle_inputs_fn(test_fn)
+        assert trainer._prepare_cycle_inputs.__func__ == test_fn
+
+    def test_set_default_causal_skip(self, causal_model, causal_tokenizer, text_dataset):
+        """Both causal models with matching tokenizers"""
+        trainer = CycleTrainer(
+            args=CycleTrainingArguments(output_dir="/tmp/cycleformers_test"),
+            models={"A": causal_model, "B": causal_model},
+            tokenizers=causal_tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+        trainer.set_cycle_inputs_fn()
+        assert trainer._prepare_cycle_inputs.__func__ == _prepare_causal_skip_cycle_inputs
+
+    def test_set_default_default(self, causal_model, seq2seq_model, causal_tokenizer, seq2seq_tokenizer, text_dataset):
+        """Any other case"""
+        trainer = CycleTrainer(
+            args=CycleTrainingArguments(output_dir="/tmp/cycleformers_test"),
+            models={"A": seq2seq_model, "B": causal_model},
+            tokenizers={"A": seq2seq_tokenizer, "B": causal_tokenizer},
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+        trainer.set_cycle_inputs_fn()
+        assert trainer._prepare_cycle_inputs.__func__ == _default_prepare_cycle_inputs
 
 
 class TestSaveCheckpoint:
