@@ -26,11 +26,22 @@ jobs:
     needs: [checks, build-docs]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-poetry
+        with:
+          python-version: 3.11
+      
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Generate build badge
         run: |
           mkdir -p .github/badges
           # If we got to this step, build succeeded
-          poetry rungenbadge build -n "build" -s "passing" -c "green" -o .github/badges/build.svg
+          poetry run genbadge build -n "build" -s "passing" -c "green" -o .github/badges/build.svg
 
       - name: Commit badges
         run: |
