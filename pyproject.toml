@@ -108,7 +108,7 @@ ignore_missing_imports = true
 [tool.pytest]
 markers = [
     "slow: mark test as slow to run",
-    "meta: mark test as testing fixtures or helper functions"
+    "requires_gpu: mark test as requiring a or taking far too long to run on a CPU"
 ]
 
 [tool.semantic_release]

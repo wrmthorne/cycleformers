@@ -27,5 +27,7 @@ jobs:
         run: poetry run python -m doctest **/*.py
 
       - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }} 
         run:
           poetry run pytest --all

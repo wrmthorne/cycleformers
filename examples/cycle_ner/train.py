@@ -62,7 +62,7 @@ def main():
     )
 
     trainer.train()
-    trainer.save_model()
+    # trainer.save_model()
 
 
 if __name__ == "__main__":
