@@ -39,7 +39,7 @@ jobs:
       - name: Generate coverage badge
         run: |
           mkdir -p .github/badges
-          genbadge coverage -i coverage.xml -o .github/badges/coverage.svg
+          poetry run genbadge coverage -i coverage.xml -o .github/badges/coverage.svg
       - name: Commit badge
         run: |
           git config --local user.email "action@github.com"

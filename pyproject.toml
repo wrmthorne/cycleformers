@@ -106,10 +106,10 @@ line-ending = "auto"
 module = "accelerate.*,datasets.*,transformers.*"
 ignore_missing_imports = true
 
-[tool.pytest]
+[tool.pytest.ini_options]
 markers = [
     "slow: mark test as slow to run",
-    "requires_gpu: mark test as requiring a or taking far too long to run on a CPU"
+    "requires_gpu: mark test as requiring a GPU or taking far too long to run on a CPU"
 ]
 
 [tool.coverage.run]

@@ -30,7 +30,7 @@ jobs:
         run: |
           mkdir -p .github/badges
           # If we got to this step, build succeeded
-          genbadge build -n "build" -s "passing" -c "green" -o .github/badges/build.svg
+          poetry rungenbadge build -n "build" -s "passing" -c "green" -o .github/badges/build.svg
 
       - name: Commit badges
         run: |
