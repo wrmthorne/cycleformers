@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import pytest
+import torch
 from datasets import Dataset
 from peft import LoraConfig, get_peft_model
 from torch.optim import AdamW
@@ -30,20 +31,12 @@ def pytest_collection_modifyitems(config, items):
 # TODO: add config tests for other architectures
 @dataclass
 class Seq2SeqModelTestConfig:
-    model_name_or_path: str = "google/flan-t5-small"
+    model_name_or_path: str = "google/t5-efficient-tiny"
 
 
 @dataclass
 class CausalModelTestConfig:
     model_name_or_path: str = "trl-internal-testing/tiny-LlamaForCausalLM-3.1"  # TODO: Make own tiny models
-
-
-@pytest.fixture(name="lora_config")
-def fixture_lora_config(request):
-    return LoraConfig(
-        r=8,
-        lora_alpha=32,
-    )
 
 
 @pytest.fixture(name="seq2seq_config")
@@ -72,8 +65,12 @@ def fixture_causal_model(causal_config):
 
 
 @pytest.fixture(name="peft_causal_model")
-def fixture_peft_causal_model(causal_model, lora_config):
-    lora_config.task_type = "CAUSAL_LM"
+def fixture_peft_causal_model(causal_model):
+    lora_config = LoraConfig(
+        task_type="CAUSAL_LM",
+        r=8,
+        lora_alpha=16,
+    )
     model = get_peft_model(causal_model, lora_config, adapter_name="A")
     model.add_adapter("B", lora_config)
     return model

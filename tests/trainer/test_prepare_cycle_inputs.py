@@ -10,7 +10,12 @@ from cycleformers import DEFAULT_SEP_SEQ, CycleTrainer
 from cycleformers.cycles import _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
 
 
-@pytest.mark.parametrize("device", ["cuda", "cpu"])
+AVAILABLE_DEVICES = ["cpu"]
+if torch.cuda.is_available():
+    AVAILABLE_DEVICES.append("cuda")
+
+
+@pytest.mark.parametrize("device", AVAILABLE_DEVICES)
 class BaseTestCycleInputs:
     @pytest.fixture(name="cycle_trainer")
     def fixture_cycle_trainer(self, device):

@@ -146,7 +146,7 @@ class TestSaveCheckpoint:
 
         assert (checkpoint_dir / "rng_state.pth").exists()
 
-        rng_state = torch.load(checkpoint_dir / "rng_state.pth")
+        rng_state = torch.load(checkpoint_dir / "rng_state.pth", weights_only=False)
         assert "python" in rng_state
         assert "numpy" in rng_state
         assert "cpu" in rng_state
