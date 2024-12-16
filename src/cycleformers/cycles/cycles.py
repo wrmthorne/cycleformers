@@ -16,10 +16,39 @@ def _default_prepare_cycle_inputs(
     tokenizer_train: PreTrainedTokenizerBase,
     cycle_name: str,
 ) -> BatchEncoding | dict[str, torch.Tensor]:
-    """Default implementation for preparing cycle inputs. Implements all model permuations and acts as a fallback
-    in case an optimised function is not available.
+    """Default implementation for preparing cycle inputs during cycle-consistency training.
 
-    TODO: Implementation currently does not handle causal-to-seq2seq or seq2seq-to-causal.
+    This function handles the core logic of preparing inputs for the cycle training loop. It processes both
+    encoder-decoder (seq2seq) and decoder-only (causal) model architectures, though some combinations are not
+    yet supported.
+
+    The function performs the following key steps:
+    1. For causal models, trims the synthetic input ids to remove prompt tokens
+    2. Decodes the synthetic tokens back to text
+    3. For causal models, combines synthetic text with original input using a separator
+    4. Tokenizes the processed text for the training model
+    5. Handles label creation differently for seq2seq vs causal models:
+        - For seq2seq: Uses original input ids directly as labels
+        - For causal: Creates labels with -100 for prompt tokens and padding
+
+    Args:
+        real_input_ids (torch.Tensor): Original input token IDs from the training data
+        synth_input_ids (torch.Tensor): Generated token IDs from the generative model
+        model_gen (nn.Module): The model used for generation (source of synth_input_ids)
+        model_train (nn.Module): The model being trained in this cycle
+        tokenizer_gen (PreTrainedTokenizerBase): Tokenizer for the generative model
+        tokenizer_train (PreTrainedTokenizerBase): Tokenizer for the training model
+        cycle_name (str): Identifier for the current cycle ('A' or 'B')
+
+    Returns:
+        BatchEncoding | dict[str, torch.Tensor]: Processed inputs ready for model training, including:
+            - input_ids: Token IDs for model input
+            - attention_mask: Attention mask for input tokens
+            - labels: Target labels for training (-100 for masked positions)
+
+    Note:
+        Currently does not support cross-architecture cycles (causal-to-seq2seq or seq2seq-to-causal).
+        Future implementations may add support for these combinations.
     """
     device = self.accelerator.device
 
@@ -107,6 +136,8 @@ def _prepare_causal_skip_cycle_inputs(
     2) Ensure that any separating text/sequence is moved to the end of the new prompt and before the response
     3) Shift all padding tokens to the right
     4) Create attention masks and labels, handling EOS tokens properly when the pad token is the same as the eos token
+
+    CURRENTLY VALIDATED ON LLaMa-3.x and Qwen-2.5
 
     Args:
         real_input_ids (torch.Tensor): Batch of prompt token IDs [batch_size, prompt_width]

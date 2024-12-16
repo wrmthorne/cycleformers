@@ -44,15 +44,7 @@ class ModelConfig:
             Task type to pass for LoRA (use `"SEQ_CLS"` for reward modeling).
         use_rslora (`bool`, *optional*, defaults to `False`):
             Whether to use Rank-Stabilized LoRA, which sets the adapter scaling factor to `lora_alpha/√r`, instead of
-            the original default value of `lora_alpha/r`.
-        load_in_8bit (`bool`, *optional*, defaults to `False`):
-            Whether to use 8 bit precision for the base model. Works only with LoRA.
-        load_in_4bit (`bool`, *optional*, defaults to `False`):
-            Whether to use 4 bit precision for the base model. Works only with LoRA.
-        bnb_4bit_quant_type (`str`, *optional*, defaults to `"nf4"`):
-            Quantization type (`"fp4"` or `"nf4"`).
-        use_bnb_nested_quant (`bool`, *optional*, defaults to `False`):
-            Whether to use nested quantization."""
+            the original default value of `lora_alpha/r`."""
 
     model_name_or_path: str | None = None
     model_revision: str = "main"
@@ -68,10 +60,6 @@ class ModelConfig:
     lora_task_type: str = "CAUSAL_LM"
     use_rslora: bool = False
     use_dora: bool = False
-    # load_in_8bit: bool = False
-    # load_in_4bit: bool = False
-    # bnb_4bit_quant_type: Literal["fp4", "nf4"] = "nf4"
-    # use_bnb_nested_quant: bool = False
 
     @property
     def peft_config(self):

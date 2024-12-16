@@ -14,7 +14,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import DataCollatorForSeq2Seq, DataCollatorWithPadding, PreTrainedTokenizerBase, Trainer
 from transformers.integrations import get_reporting_integration_callbacks
-from transformers.tokenization_utils_base import BatchEncoding
 from transformers.trainer import (
     DEFAULT_CALLBACKS,
     DEFAULT_PROGRESS_CALLBACK,
@@ -25,6 +24,7 @@ from transformers.trainer_callback import (
     CallbackHandler,
     ExportableState,
     PrinterCallback,
+    TrainerCallback,
     TrainerControl,
     TrainerState,
 )
@@ -36,18 +36,116 @@ from .utils import DEFAULT_SEP_SEQ, auto_temp_attributes
 
 
 class CycleTrainer(Trainer):
+    """A trainer class that implements cycle training for language models.
+
+    CycleTrainer extends the Hugging Face Trainer to support cycle training between two language models.
+    It can handle both encoder-decoder and causal language models, with support for PEFT adapters.
+
+    The trainer implements a cycle where:
+    1. Model A generates text from Model B's training data
+    2. Model A is trained to reconstruct Model B's original input
+    3. Model B generates text from Model A's training data
+    4. Model B is trained to reconstruct Model A's original input
+
+    Args:
+        args (CycleTrainingArguments): Training arguments specific to cycle training
+        models (nn.Module | dict[str, nn.Module] | None): The models to train. Can be:
+            - A single model with two PEFT adapters named 'A' and 'B'
+            - A dictionary with keys 'A' and 'B' containing separate models
+            - None (for testing/subclassing)
+        tokenizers (PreTrainedTokenizerBase | dict[str, PreTrainedTokenizerBase] | None):
+            The tokenizers to use. Can be:
+            - A single tokenizer shared between both models
+            - A dictionary with keys 'A' and 'B' containing separate tokenizers
+            - None (for testing/subclassing)
+        train_dataset_A: Training dataset for model A
+        train_dataset_B: Training dataset for model B
+        eval_dataset_A: Evaluation dataset for model A
+        eval_dataset_B: Evaluation dataset for model B
+        data_collator_A: Data collator for model A
+        data_collator_B: Data collator for model B
+        callbacks: List of callbacks to use during training
+        peft_configs (PeftConfig | dict[str, PeftConfig] | None): PEFT configurations. Can be:
+            - A single config to create identical adapters
+            - A dictionary with keys 'A' and 'B' for different configurations
+            - None if not using PEFT
+
+    Examples:
+        Basic usage with two separate models:
+        >>> from transformers import AutoModelForCausalLM, AutoTokenizer
+        >>> from cycleformers import CycleTrainingArguments
+        >>>
+        >>> # Initialize models and tokenizers
+        >>> model_A = AutoModelForCausalLM.from_pretrained("gpt2-small")
+        >>> model_B = AutoModelForCausalLM.from_pretrained("gpt2-small")
+        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2-small")
+        >>> tokenizer.pad_token = tokenizer.eos_token
+        >>>
+        >>> # Create trainer
+        >>> trainer = CycleTrainer(
+        ...     args=CycleTrainingArguments(output_dir="./output"),
+        ...     models={"A": model_A, "B": model_B},
+        ...     tokenizers=tokenizer,
+        ...     train_dataset_A=train_dataset_A,
+        ...     train_dataset_B=train_dataset_B
+        ... )
+
+        Using PEFT with a single model and two adapters:
+        >>> from peft import LoraConfig
+        >>> from transformers import AutoModelForCausalLM, AutoTokenizer
+        >>> from cycleformers import CycleTrainingArguments
+        >>>
+        >>> # Initialize base model and tokenizer
+        >>> base_model = AutoModelForCausalLM.from_pretrained("gpt2-small")
+        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2-small")
+        >>> tokenizer.pad_token = tokenizer.eos_token
+        >>>
+        >>> # Create PEFT config
+        >>> peft_config = LoraConfig(
+        ...     r=8,
+        ...     lora_alpha=32,
+        ...     target_modules=["q_proj", "v_proj"],
+        ...     lora_dropout=0.05,
+        ...     bias="none"
+        ... )
+        >>>
+        >>> # Create trainer with PEFT
+        >>> trainer = CycleTrainer(
+        ...     args=CycleTrainingArguments(output_dir="./output"),
+        ...     models=base_model,
+        ...     tokenizers=tokenizer,
+        ...     train_dataset_A=train_dataset_A,
+        ...     train_dataset_B=train_dataset_B,
+        ...     peft_configs=peft_config  # Will create two identical adapters
+        ... )
+
+        Using different PEFT configs for each adapter:
+        >>> peft_configs = {
+        ...     "A": LoraConfig(r=8, lora_alpha=32),
+        ...     "B": LoraConfig(r=16, lora_alpha=64)
+        ... }
+        >>> trainer = CycleTrainer(
+        ...     args=CycleTrainingArguments(output_dir="./output"),
+        ...     models=base_model,
+        ...     tokenizers=tokenizer,
+        ...     train_dataset_A=train_dataset_A,
+        ...     train_dataset_B=train_dataset_B,
+        ...     peft_configs=peft_configs  # Different config for each adapter
+        ... )
+    """
+
     def __init__(
         self,
         args: CycleTrainingArguments,
         models: nn.Module | dict[str, nn.Module] | None = None,
         tokenizers: PreTrainedTokenizerBase | dict[str, PreTrainedTokenizerBase] | None = None,
-        train_dataset_A=None,
-        train_dataset_B=None,
-        eval_dataset_A=None,
-        eval_dataset_B=None,
-        data_collator_A=None,
-        data_collator_B=None,
-        callbacks=None,
+        train_dataset_A: datasets.Dataset | None = None,
+        train_dataset_B: datasets.Dataset | None = None,
+        eval_dataset_A: datasets.Dataset | None = None,
+        eval_dataset_B: datasets.Dataset | None = None,
+        data_collator_A: DataCollatorWithPadding | DataCollatorForSeq2Seq | None = None,
+        data_collator_B: DataCollatorWithPadding | DataCollatorForSeq2Seq | None = None,
+        callbacks: list[TrainerCallback] | None = None,
         peft_configs: PeftConfig | dict[str, PeftConfig] | None = None,
     ):
         self.args = args
@@ -180,6 +278,9 @@ class CycleTrainer(Trainer):
         ## Calculate batches
         if not args.max_steps > 0:
             # Calculate number of samples per epoch
+            if train_dataset_A is None or train_dataset_B is None:
+                raise ValueError("Both train_dataset_A and train_dataset_B must be provided")
+
             num_samples_per_epoch = min(len(train_dataset_A), len(train_dataset_B))
             # Calculate number of steps considering batch size and gradient accumulation
             num_update_steps_per_epoch = num_samples_per_epoch // (
@@ -234,19 +335,69 @@ class CycleTrainer(Trainer):
 
     def _prepare_dataset(
         self,
-        dataset,
-        processing_class,
-        text_column,
-        max_seq_length,
-        remove_unused_columns,
-        is_encoder_decoder,
+        dataset: datasets.Dataset,
+        processing_class: PreTrainedTokenizerBase,
+        text_column: str,
+        max_seq_length: int | None,
+        remove_unused_columns: bool,
+        is_encoder_decoder: bool,
         formatting_func: Callable | None = None,
-        add_special_tokens=True,
-        skip_prepare_dataset=False,
-    ):
-        """
-        Modification of TRL SFTTrainer._prepare_dataset
-        https://github.com/huggingface/trl/blob/b02189aaa538f3a95f6abb0ab46c0a971bfde57e/trl/trainer/sft_trainer.py#L329
+        add_special_tokens: bool = True,
+        skip_prepare_dataset: bool = False,
+    ) -> datasets.Dataset:
+        """Prepares a dataset for training by tokenizing text and formatting inputs.
+
+        This method processes raw text datasets into tokenized format suitable for training.
+        It handles both encoder-decoder and causal language models, with support for custom
+        text formatting.
+
+        Args:
+            dataset (Dataset): HuggingFace dataset to process
+            processing_class (PreTrainedTokenizerBase): Tokenizer to use for processing
+            text_column (str): Name of column containing text data
+            max_seq_length (int | None): Maximum sequence length for tokenization
+            remove_unused_columns (bool): Whether to remove columns not used in training
+            is_encoder_decoder (bool): Whether the model is an encoder-decoder
+            formatting_func (Callable | None): Optional function to format text before tokenization.
+                Must return a list of strings. Defaults to None.
+            add_special_tokens (bool): Whether to add special tokens during tokenization.
+                Defaults to True.
+            skip_prepare_dataset (bool): Skip processing and return dataset as-is.
+                Defaults to False.
+
+        Returns:
+            Dataset: Processed dataset containing 'input_ids' and 'attention_mask'
+
+        Raises:
+            ValueError: If dataset is None or formatting_func doesn't return a list
+
+        Examples:
+            Basic usage:
+            >>> from datasets import Dataset
+            >>> dataset = Dataset.from_dict({"text": ["Hello world", "How are you?"]})
+            >>> processed = trainer._prepare_dataset(
+            ...     dataset=dataset,
+            ...     processing_class=tokenizer,
+            ...     text_column="text",
+            ...     max_seq_length=128,
+            ...     remove_unused_columns=True,
+            ...     is_encoder_decoder=False
+            ... )
+            >>> processed[0].keys()
+            dict_keys(['input_ids', 'attention_mask'])
+
+            With custom formatting:
+            >>> def format_text(example):
+            ...     return [f"Question: {text}" for text in example["text"]]
+            >>> processed = trainer._prepare_dataset(
+            ...     dataset=dataset,
+            ...     processing_class=tokenizer,
+            ...     text_column="text",
+            ...     max_seq_length=128,
+            ...     remove_unused_columns=True,
+            ...     is_encoder_decoder=False,
+            ...     formatting_func=format_text
+            ... )
         """
         if dataset is None:
             raise ValueError("Dataset cannot be None")
@@ -329,10 +480,12 @@ class CycleTrainer(Trainer):
         return tokenized_dataset
 
     def get_train_dataloader(self, dataset, data_collator):
+        """Get a dataloader for training"""
         dataloader_params = {"batch_size": self.args.per_device_train_batch_size, "collate_fn": data_collator}
         return self.accelerator.prepare(DataLoader(dataset, **dataloader_params))
 
     def get_eval_dataloader(self, dataset, data_collator):
+        """Get a dataloader for evaluation"""
         dataloader_params = {"batch_size": self.args.per_device_eval_batch_size, "collate_fn": data_collator}
         return self.accelerator.prepare(DataLoader(dataset, **dataloader_params))
 
@@ -406,7 +559,16 @@ class CycleTrainer(Trainer):
         super().create_optimizer_and_scheduler(num_training_steps=num_training_steps)
         return self.optimizer, self.lr_scheduler
 
-    def train(self):
+    def train(self) -> TrainOutput:
+        """Train models using cycle training.
+
+        Returns:
+            TrainOutput: Contains training metrics and state
+
+        Examples:
+            >>> trainer.train()
+            TrainOutput(global_step=1000, training_loss=2.4, metrics={})
+        """
         args = self.args
         optimizer_A = self.optimizer_A
         optimizer_B = self.optimizer_B
@@ -521,9 +683,9 @@ class CycleTrainer(Trainer):
         return TrainOutput(self.state.global_step, 0.0, {})
 
     @contextmanager
-    def switch_adapter(self, model: nn.Module, adapter_name: str):
+    def switch_adapter(self, model: nn.Module, adapter_name: str | None = None):
         """Context manager to safely switch adapters and handle cleanup"""
-        if not self.is_peft_model:
+        if not self.is_peft_model or adapter_name is None:
             yield
             return
 
@@ -535,9 +697,55 @@ class CycleTrainer(Trainer):
             model.set_adapter(previous_adapter)
 
     def _cycle_step(
-        self, model_train, model_gen, tokenizer_train, tokenizer_gen, optimizer, scheduler, batch, idx, cycle_name
-    ):
-        """Perform a single cycle step"""
+        self,
+        model_train: nn.Module,
+        model_gen: nn.Module,
+        tokenizer_train: PreTrainedTokenizerBase,
+        tokenizer_gen: PreTrainedTokenizerBase,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler._LRScheduler,
+        batch: dict,
+        idx: int,
+        cycle_name: str,
+    ) -> dict:
+        """Perform a single training step in the cycle training process.
+
+        This method handles the core cycle training logic for a single step:
+        1. Generate synthetic text using model_gen
+        2. Process the synthetic text into training inputs
+        3. Train model_train to reconstruct the original input
+
+        Args:
+            model_train (nn.Module): The model being trained in this step
+            model_gen (nn.Module): The model generating synthetic text
+            tokenizer_train (PreTrainedTokenizerBase): Tokenizer for model_train
+            tokenizer_gen (PreTrainedTokenizerBase): Tokenizer for model_gen
+            optimizer (torch.optim.Optimizer): Optimizer for model_train
+            scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler
+            batch (dict): Current training batch containing input_ids and attention_mask
+            idx (int): Current batch index
+            cycle_name (str): Name of current cycle ("A" or "B")
+
+        Returns:
+            dict: Training metrics for this step including:
+                - train_loss_{cycle_name}: Training loss for this step
+                - learning_rate_{cycle_name}: Current learning rate
+
+        Examples:
+            >>> metrics = trainer._cycle_step(
+            ...     model_train=model_A,
+            ...     model_gen=model_B,
+            ...     tokenizer_train=tokenizer_A,
+            ...     tokenizer_gen=tokenizer_B,
+            ...     optimizer=optimizer_A,
+            ...     scheduler=scheduler_A,
+            ...     batch={"input_ids": ids, "attention_mask": mask},
+            ...     idx=0,
+            ...     cycle_name="A"
+            ... )
+            >>> metrics
+            {'train_loss_A': 2.4, 'learning_rate_A': 5e-5}
+        """
         model_gen.eval()
         model_train.train()
         metrics = {}
@@ -579,12 +787,31 @@ class CycleTrainer(Trainer):
         return metrics
 
     def set_cycle_inputs_fn(self, fn: Callable | None = None):
-        """
-        Setter method to control which mid cycle token preparation method to use from cycleformers.cycles
+        """Set the function used to prepare inputs during cycle training.
 
-        Method is called during class init but may be called by user post instantiation to force specific behaviour
-        without subclassing. If no arg is passed, this method will automatically select the best optimised method
-        for the given conditions.
+        This method controls how generated text is processed into training inputs for the next model.
+        If no function is provided, an optimized implementation is automatically selected based on the
+        model types and tokenizers.
+
+        Args:
+            fn (Callable | None): Function to prepare cycle inputs. Should accept:
+                - real_input_ids: Original input token IDs
+                - synth_input_ids: Generated token IDs
+                - model_gen: The model that generated the text
+                - model_train: The model being trained
+                - tokenizer_gen: Tokenizer for the generative model
+                - tokenizer_train: Tokenizer for the training model
+                - cycle_name: Name of current cycle ("A" or "B")
+
+        Examples:
+            >>> def custom_prepare_fn(self, real_ids, synth_ids, *args, **kwargs):
+            ...     # Custom implementation
+            ...     return {"input_ids": ids, "attention_mask": mask, "labels": labels}
+            >>>
+            >>> trainer.set_cycle_inputs_fn(custom_prepare_fn)
+
+            Using default optimization:
+            >>> trainer.set_cycle_inputs_fn()  # Automatically selects best implementation
         """
         try:
             # User provided method
@@ -614,18 +841,43 @@ class CycleTrainer(Trainer):
         tokenizer_gen: PreTrainedTokenizerBase,
         tokenizer_train: PreTrainedTokenizerBase,
         cycle_name: str,
-    ) -> BatchEncoding:
-        """
-        Handlle the outputs of the generative model ready for the training model. In the case of seq2seq, simply
+    ) -> dict[str, torch.Tensor]:
+        """Endpoint for handling of mid-cycle token processing.
+
+        Handle the outputs of the generative model ready for the training model. In the case of seq2seq, simply
         use the real input ids as labels and the synth input ids as input. For causal, we need to split the prompt
         from the response, clean the prompt, swap the order, add any separator tokens we want and then right pad.
 
         Subclass and override this method to implement custom logic. The method should return a BatchEncoding object
         or equivalent dict with input_ids, attention_mask and labels.
+
+        For more details see the `_prepare_cycle_inputs` method in the `cycles/cycles.py` file.
         """
         raise PrepareCycleInputsNotSet()
 
-    def evaluate(self, ignore_keys=None):
+    def evaluate(self, ignore_keys=None) -> dict[str, torch.Tensor]:
+        """Evaluate the models during training.
+
+        This method evaluates the models during training to monitor progress and adjust training parameters.
+        It calculates the loss for both models and returns a dictionary with the evaluation metrics.
+
+        Args:
+            ignore_keys (list[str] | None): List of keys to ignore in the evaluation metrics
+
+        Returns:
+            dict[str, torch.Tensor]: Dictionary containing evaluation metrics for both models
+
+        Examples:
+            >>> trainer = CycleTrainer(args, models, tokenizers)
+            >>> metrics = trainer.evaluate()
+            >>> print(metrics)
+            {'eval_loss_A': 2.1, 'eval_loss_B': 1.9}
+
+            Ignore specific metrics:
+            >>> metrics = trainer.evaluate(ignore_keys=['eval_loss_B'])
+            >>> print(metrics)
+            {'eval_loss_A': 2.1}
+        """
         metrics = {}
 
         # Evaluate model A

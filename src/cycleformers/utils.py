@@ -10,6 +10,14 @@ DEFAULT_SEP_SEQ = "\n\n"
 
 
 class DataclassProtocol(Protocol):
+    """Protocol defining the required interface for dataclass operations.
+
+    Attributes:
+        __dataclass_fields__: Dictionary mapping field names to field objects
+        __name__: Name of the dataclass
+        __dataclass_params__: Dataclass configuration parameters
+    """
+
     __dataclass_fields__: dict[str, Any]
     __name__: str
     __dataclass_params__: Any
@@ -19,15 +27,38 @@ T = TypeVar("T", bound=DataclassProtocol)
 
 
 def suffix_dataclass_factory(base_class: type[T], suffix: str = "_A") -> type[T]:
-    """
-    Creates a new dataclass by appending a suffix to the base class name and all its fields.
+    """Creates a new dataclass by appending a suffix to the base class name and all its fields.
 
-    args:
-        base_class: Base dataclass to derive from
-        suffix: Suffix to append to the base class name and all its fields
+    This function creates a new dataclass that mirrors the structure of a base dataclass,
+    but with modified field names. It's useful for creating parallel configurations where
+    you need similar but distinct settings for different components.
 
-    returns:
-        New dataclass with suffixed name and fields
+    Args:
+        base_class (type[T]): Base dataclass to derive from
+        suffix (str, optional): Suffix to append to the base class name and fields. Defaults to "_A"
+
+    Returns:
+        type[T]: New dataclass with suffixed name and fields
+
+    Raises:
+        TypeError: If base_class is not a dataclass
+
+    Examples:
+        >>> from dataclasses import dataclass
+        >>> @dataclass
+        ... class BaseConfig:
+        ...     learning_rate: float = 0.001
+        ...     batch_size: int = 32
+        >>>
+        >>> ConfigA = suffix_dataclass_factory(BaseConfig, "_A")
+        >>> config_a = ConfigA(learning_rate_A=0.002, batch_size_A=64)
+        >>> config_a
+        ConfigA(learning_rate_A=0.002, batch_size_A=64)
+
+    Notes:
+        - The new dataclass is created without inheriting from the base class
+        - All field attributes (init, repr, compare, etc.) are preserved
+        - Default values and factory functions are maintained
     """
     if not hasattr(base_class, "__dataclass_fields__"):
         raise TypeError("Base class must be a dataclass")
@@ -68,10 +99,40 @@ def suffix_dataclass_factory(base_class: type[T], suffix: str = "_A") -> type[T]
 
 
 def auto_temp_attributes(*attrs_to_cleanup):
-    """
-    Decorator that automatically sets and manages temporary attributes on a class instance.
-    This solves the issue of methods that modify attributes that are needed for other methods.
-    Parameters matching attribute names are set to their passed values, others to None.
+    """Decorator that automatically manages temporary attributes on a class instance.
+
+    This decorator solves the issue of methods that need to temporarily modify class attributes
+    that might be needed by other methods. It automatically sets attributes based on method
+    parameters and restores their original values (or removes them) after the method completes.
+
+    Args:
+        *attrs_to_cleanup: Variable number of attribute names to manage
+
+    Returns:
+        Callable: Decorated function that handles attribute lifecycle
+
+    Examples:
+        >>> class MyClass:
+        ...     def __init__(self):
+        ...         self.permanent = "permanent"
+        ...
+        ...     @auto_temp_attributes("model", "optimizer")
+        ...     def my_method(self, model, optimizer=None):
+        ...         print(f"Using {model} and {optimizer}")
+        ...         print(f"Permanent: {self.permanent}")
+        >>>
+        >>> obj = MyClass()
+        >>> obj.my_method("bert", optimizer="adam")
+        Using bert and adam
+        Permanent: permanent
+        >>> hasattr(obj, "model")  # Attribute is cleaned up
+        False
+
+    Notes:
+        - Original attribute values are restored after method execution
+        - Attributes that didn't exist are removed
+        - Works with both positional and keyword arguments
+        - Handles exceptions by ensuring cleanup
     """
 
     def decorator(func):
@@ -117,7 +178,7 @@ def auto_temp_attributes(*attrs_to_cleanup):
 
 
 def get_peft_config(model_config):
-    """Helper function to return a PEFT config from a model config dataclass."""
+    """Creates a PEFT LoRA configuration from a model configuration dataclass."""
     if model_config.use_peft is False:
         return None
 

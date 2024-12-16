@@ -15,27 +15,52 @@ string_to_tag = {string: tag for tag, string in tag_to_string.items()}
 
 @dataclass
 class CONLL2003ProcessorConfig(ProcessorConfig):
+    """Configuration class for CONLL2003 dataset processor.
+
+    This class extends the base ProcessorConfig with CONLL2003-specific parameters.
+
+    Args:
+        dataset_name (str): HuggingFace dataset name/path. Defaults to "eriktks/conll2003".
+        preset (Literal["entity_seqs"] | None): Processing preset to use. Currently only supports "entity_seqs"
+            which extracts sequences containing named entities. Defaults to "entity_seqs".
+        sep_token (str): Token used to separate elements in processed sequences. Defaults to "|".
+
+    Example:
+        >>> config = CONLL2003ProcessorConfig(
+        ...     dataset_name="conll2003",
+        ...     preset="entity_seqs",
+        ...     sep_token="|"
+        ... )
+        >>> processor = CONLL2003Processor(config)
+    """
+
     dataset_name: str = "eriktks/conll2003"
     preset: Literal["entity_seqs"] | None = "entity_seqs"
     # trust_remote_code: bool = False
     sep_token: str = "|"
 
 
-def reconstruct_sentence(tokens):
-    """
-    Reconstructs a sentence from CoNLL-2003 tokens while handling whitespace correctly.
+def reconstruct_sentence(tokens: list[str]) -> str:
+    """Reconstructs a sentence from CoNLL-2003 tokens while handling whitespace correctly.
 
-    Rules:
-    1. No space before punctuation (,.!?:;)
-    2. Space between regular words
-    3. Handles contractions properly (don't, I'm, etc.)
-    4. Maintains quotes correctly
+    This function takes a list of tokens from the CoNLL-2003 format and reconstructs them into a properly formatted sentence
+    by applying standard English language spacing rules:
+
+    - No spaces before punctuation marks (,.!?:;)
+    - Spaces between regular words
+    - Proper handling of contractions (don't, I'm, etc.)
+    - Correct spacing around quotation marks
 
     Args:
-        tokens (list): List of tokens from CoNLL format
+        tokens (list[str]): List of tokens from the CoNLL-2003 dataset
 
     Returns:
-        str: Reconstructed sentence with proper spacing
+        str: The reconstructed sentence with proper spacing and punctuation
+
+    Example:
+        >>> tokens = ["I", "don", "'t", "like", "New", "York", "."]
+        >>> reconstruct_sentence(tokens)
+        "I don't like New York."
     """
     if not tokens:
         return ""
@@ -72,13 +97,29 @@ def reconstruct_sentence(tokens):
 def ner_to_sequences(tokens: list[str], tags: list[int], sep_token: str) -> str:
     """Convert a list of tokens and their corresponding tags to a sequence of entity types.
 
+    This function takes tokens and their NER tags and converts them into a sequence format
+    suitable for sequence-to-sequence training. It follows the BIO2 tagging scheme where:
+    - B- prefix indicates beginning of an entity
+    - I- prefix indicates inside/continuation of an entity
+    - O indicates outside any entity (not used in output)
+
     Args:
-        tokens: List of string tokens from a single sentence
-        tags: List of integer tags corresponding to the tokens
-        sep_token: Separator token to use between entity and its type
+        tokens (list[str]): List of string tokens from a single sentence
+        tags (list[int]): List of integer tags corresponding to the tokens using BIO2 scheme
+        sep_token (str): Separator token to use between entity and its type
 
     Returns:
-        List of strings, each representing an entity and its type (e.g., ["John | person", "Google | organisation"])
+        str: A string containing entities and their types separated by the sep_token.
+            For example: "John Smith | person Google | organization"
+
+    Raises:
+        ValueError: If an I- tag appears without a preceding B- tag (invalid BIO2 sequence)
+
+    Example:
+        >>> tokens = ["John", "Smith", "works", "at", "Google", "."]
+        >>> tags = [1, 2, 0, 0, 7, 0]  # B-PER, I-PER, O, O, B-ORG, O
+        >>> ner_to_sequences(tokens, tags, " | ")
+        'John Smith | person Google | organization'
     """
     compound_tokens = []
     for token, tag in zip(tokens, tags):
@@ -115,18 +156,19 @@ class CONLL2003Processor(BaseProcessor):
         >>> config = CONLL2003ProcessorConfig(sep_token=" | ")
         >>> processor = CONLL2003Processor(config)
         >>> dataset_A, dataset_B = processor.process()
-        >>> print(dataset_A["train"][0])
+        >>> print(dataset_A["train"][`0`])
         {'text': 'John Smith works at Google.'}
-        >>> print(dataset_B["train"][0])
+        >>> print(dataset_B["train"][`0`])
         {'text': 'John Smith | person Google | organization'}
     """
 
     def __init__(self, config: CONLL2003ProcessorConfig = CONLL2003ProcessorConfig()):
         super().__init__(config)
         # Ensure formatting of sep token is correct
+        self.config: CONLL2003ProcessorConfig = config  # type annotation for config
         self.sep_token = config.sep_token.strip()
 
-    def load(self):
+    def load(self) -> DatasetDict:
         return load_dataset(
             self.config.dataset_name,
             trust_remote_code=True,  # FIXME: Don't allow by default or hardcode

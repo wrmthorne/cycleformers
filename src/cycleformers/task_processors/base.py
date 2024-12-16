@@ -46,7 +46,7 @@ class BaseProcessor(ABC):
         self.config = config
 
     @abstractmethod
-    def load(self):
+    def load(self) -> DatasetDict:
         """Load the source dataset."""
         raise NotImplementedError
 
