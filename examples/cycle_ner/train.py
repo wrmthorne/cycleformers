@@ -1,17 +1,10 @@
 import sys
 from pathlib import Path
 
-from datasets import load_from_disk
-from transformers import (
-    AutoConfig,
-    AutoModelForCausalLM,
-    AutoModelForSeq2SeqLM,
-    AutoTokenizer,
-    HfArgumentParser,
-)
+from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, HfArgumentParser
 
-from cycleformers import CycleTrainer, CycleTrainingArguments, DataConfig, ModelConfig
-from cycleformers.utils import get_peft_config, suffix_dataclass_factory
+from cycleformers import CycleTrainer, CycleTrainingArguments, ModelConfig
+from cycleformers.task_processors.ner import CONLL2003Processor, CONLL2003ProcessorConfig
 
 
 def get_model_and_tokenizer(model_config, training_args):
@@ -38,21 +31,18 @@ def get_model_and_tokenizer(model_config, training_args):
 
 def main():
     # FIXME: Work out how to get dataclass_A.param_A into form dataclass.param
-    parser = HfArgumentParser((CycleTrainingArguments, ModelConfig))
+    parser = HfArgumentParser((CycleTrainingArguments, ModelConfig, CONLL2003ProcessorConfig))
 
-    # FIXME: Allow for cli to override yaml files
     maybe_yaml = Path(sys.argv[1])
     if maybe_yaml.suffix == ".yaml" and maybe_yaml.exists():
-        training_args, model_config = parser.parse_yaml_file(maybe_yaml)
+        training_args, model_config, conll_config = parser.parse_yaml_file(maybe_yaml)
     else:
-        (
-            training_args,
-            model_config,
-        ) = parser.parse_args_into_dataclasses()
+        raise ValueError("Only support for yaml right now")
 
-    # TODO: Allow user specified datasests in a generic script
-    dataset_A = load_from_disk("./data/en")
-    dataset_B = load_from_disk("./data/de")
+    task_processor = CONLL2003Processor(conll_config)
+    dataset_A, dataset_B = task_processor.process()
+
+    models, tokenizer = get_model_and_tokenizer(model_config, training_args)
 
     # FIXME: Don't force single model and tokenizer
     models, tokenizer = get_model_and_tokenizer(model_config, training_args)
@@ -66,9 +56,9 @@ def main():
         tokenizers=tokenizer,
         train_dataset_A=dataset_A["train"],
         train_dataset_B=dataset_B["train"],
-        eval_dataset_A=dataset_A["test"] if not training_args.eval_strategy == "no" else None,
-        eval_dataset_B=dataset_B["test"] if not training_args.eval_strategy == "no" else None,
-        peft_configs=get_peft_config(model_config) if model_config.use_peft else None,
+        eval_dataset_A=dataset_A["eval"] if not training_args.eval_strategy == "no" else None,
+        eval_dataset_B=dataset_B["eval"] if not training_args.eval_strategy == "no" else None,
+        peft_configs=model_config.peft_config,
     )
 
     trainer.train()

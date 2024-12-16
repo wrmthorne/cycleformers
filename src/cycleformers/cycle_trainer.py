@@ -556,7 +556,7 @@ class CycleTrainer(Trainer):
             # Update if needed
             if (idx + 1) % self.args.gradient_accumulation_steps == 0:
                 metrics[f"train_loss_{cycle_name}"] = loss.detach().float().cpu().item()
-                metrics[f"learning_rate_{cycle_name}"] = optimizer.param_groups[0]["lr"].cpu()
+                metrics[f"learning_rate_{cycle_name}"] = optimizer.param_groups[0]["lr"]
                 optimizer.step()
                 optimizer.zero_grad()
                 scheduler.step()
