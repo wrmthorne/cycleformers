@@ -14,6 +14,7 @@ class ProcessorConfig:
 
     eval_split_ratio: float = 0.2
     dataset_seed: int = 42
+    cache_dir: str | None = None
 
 
 class BaseProcessor(ABC):

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
 
@@ -84,13 +85,42 @@ def ner_to_sequences(tokens: list[str], tags: list[int], sep_token: str) -> str:
         if tag in [1, 3, 5, 7]:
             tag_string = tag_to_string[idx_to_tag[tag].split("-")[-1]]
             compound_tokens.append([token, sep_token, tag_string])
-        elif tag in [2, 4, 6, 8] and compound_tokens:
+        elif tag in [2, 4, 6, 8]:
+            if not compound_tokens:
+                raise ValueError("Missing B-tag before I-tag. Please use BIO2 tagging scheme, not BIO1.")
+
             compound_tokens[-1].insert(-2, token)
 
     return f" {sep_token} ".join([" ".join(token_tags) for token_tags in compound_tokens])
 
 
 class CONLL2003Processor(BaseProcessor):
+    """Processor for the CONLL2003 Named Entity Recognition dataset.
+
+    This processor handles the CONLL2003 dataset which contains text annotated with named entities.
+    It converts the dataset into two formats:
+    - Dataset A: Raw text -> Entity sequences
+    - Dataset B: Entity sequences -> Raw text
+
+    The processor:
+    1. Loads the CONLL2003 dataset
+    2. Converts the token-level NER annotations into sequence format
+    3. Creates two complementary datasets for cycle training
+
+    Args:
+        config (CONLL2003ProcessorConfig): Configuration object controlling processor behavior.
+            Includes settings like separator token between entities and their types.
+
+    Example:
+        >>> config = CONLL2003ProcessorConfig(sep_token=" | ")
+        >>> processor = CONLL2003Processor(config)
+        >>> dataset_A, dataset_B = processor.process()
+        >>> print(dataset_A["train"][0])
+        {'text': 'John Smith works at Google.'}
+        >>> print(dataset_B["train"][0])
+        {'text': 'John Smith | person Google | organization'}
+    """
+
     def __init__(self, config: CONLL2003ProcessorConfig = CONLL2003ProcessorConfig()):
         super().__init__(config)
         # Ensure formatting of sep token is correct
@@ -100,17 +130,19 @@ class CONLL2003Processor(BaseProcessor):
         return load_dataset(
             self.config.dataset_name,
             trust_remote_code=True,  # FIXME: Don't allow by default or hardcode
+            cache_dir=self.config.cache_dir,
         )
 
     def preprocess(self, dataset: DatasetDict) -> tuple[DatasetDict, DatasetDict]:
+        original_cols = dataset["train"].column_names
         dataset_A = dataset.map(
             lambda x: {
                 "sentence": reconstruct_sentence(x["tokens"]),
                 "entity_seq": ner_to_sequences(x["tokens"], x["ner_tags"], self.sep_token),
             }
-        ).remove_columns(["tokens", "ner_tags", "pos_tags", "chunk_tags"])
+        ).remove_columns(original_cols)
 
-        dataset_B = dataset_A.copy()
+        dataset_B = deepcopy(dataset_A)
         dataset_A = dataset_A.rename_columns({"sentence": "text", "entity_seq": "label"})
         dataset_A["train"] = dataset_A["train"].remove_columns(["label"])
         dataset_B = dataset_B.rename_columns({"entity_seq": "text", "sentence": "label"})
