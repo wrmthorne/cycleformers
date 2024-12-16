@@ -1,3 +1,4 @@
+import gc
 from copy import copy
 
 import torch
@@ -149,15 +150,17 @@ def _prepare_causal_skip_cycle_inputs(
     device = self.accelerator.device
 
     # Mask off all special tokens
-    special_mask = (
-        (synth_input_ids != tokenizer_gen.bos_token_id)
-        & (synth_input_ids != tokenizer_gen.eos_token_id)
-        & (synth_input_ids != tokenizer_gen.pad_token_id)
-    ).to(device)
+    special_mask = torch.ones_like(synth_input_ids).to(device)
+    if tokenizer_gen.bos_token_id is not None:
+        special_mask &= ~torch.eq(synth_input_ids, tokenizer_gen.bos_token_id)
+    if tokenizer_gen.eos_token_id is not None:
+        special_mask &= ~torch.eq(synth_input_ids, tokenizer_gen.eos_token_id)
+    if tokenizer_gen.pad_token_id is not None:
+        special_mask &= ~torch.eq(synth_input_ids, tokenizer_gen.pad_token_id)
 
     # Count number of tokens in prompt and response
-    prompt_lens = special_mask[:, :INPUTS_WIDTH, None].sum(dim=1).to(device)
-    response_lens = special_mask[:, PROMPT_WIDTH:, None].sum(dim=1).to(device)
+    prompt_lens = torch.sum(special_mask[:, :INPUTS_WIDTH, None], dim=1).to(device)
+    response_lens = torch.sum(special_mask[:, PROMPT_WIDTH:, None], dim=1).to(device)
 
     # Calculate how much to shift each part
     prompt_shifts = (response_lens + SEP_SEQ_LEN).to(device)
@@ -170,21 +173,23 @@ def _prepare_causal_skip_cycle_inputs(
     indices[:, PROMPT_WIDTH:] += special_mask[:, PROMPT_WIDTH:] * response_shifts
     indices[:, INPUTS_WIDTH:PROMPT_WIDTH] += special_mask[:, INPUTS_WIDTH:PROMPT_WIDTH] * separator_shifts
 
-    # Use BOS offset to shift padding to the right
-    indices += -(synth_input_ids == tokenizer_gen.bos_token_id).nonzero().to(device)[:, -1, None]
-    indices %= SEQ_LEN
+    # Use first non-special token as offset. +1 to offset if BOS token present
+    first_content_indices = -special_mask.to(torch.int64).argmax(dim=1)
+    indices += first_content_indices[:, None] + bool(tokenizer_gen.bos_token_id)
 
+    # Mod by length to wrap value around - cannot have negatives for scatter
+    indices %= SEQ_LEN
     input_ids = torch.zeros_like(synth_input_ids, device=device)
     input_ids.scatter_(1, indices, synth_input_ids)
 
-    # Right padded following scatter. EOS is always the first "pad" token
-    # Only necessary if pad token is eos token
+    # Right padded following scatter. EOS is always the first "PAD" token
+    # Only necessary if PAD token is EOS token
     attn_mask = input_ids != tokenizer_train.pad_token_id
     if tokenizer_train.eos_token_id == tokenizer_train.pad_token_id:
         eos_idxs = (~attn_mask & torch.roll(attn_mask, 1, dims=1)).nonzero()
         attn_mask[eos_idxs[:, 0], eos_idxs[:, 1]] = True
     else:
-        eos_idxs = (synth_input_ids == tokenizer_gen.eos_token_id).nonzero()
+        eos_idxs = torch.eq(synth_input_ids, tokenizer_gen.eos_token_id).nonzero()
 
     labels = torch.full_like(synth_input_ids, -100, device=device)
     special_mask[:, INPUTS_WIDTH:] = False
@@ -206,8 +211,11 @@ def _prepare_causal_skip_cycle_inputs(
         prompt_shifts,
         response_shifts,
         separator_shifts,
+        first_content_indices,
         indices,
     )
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
 
     return {"input_ids": input_ids, "attention_mask": attn_mask.to(torch.int64), "labels": labels}
