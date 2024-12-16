@@ -26,8 +26,24 @@ jobs:
       - name: Run doctests
         run: poetry run python -m doctest **/*.py
 
-      - name: Run tests
-        env:
-          PYTHONPATH: ${{ github.workspace }} 
-        run:
-          poetry run pytest --all
+      - name: Run tests with coverage
+        run: >
+          poetry run pytest
+          --cov=src/cycleformers
+          --cov-report=xml
+          --cov-report=term-missing tests/
+          tests/
+          --all
+          # --cov-fail-under=80
+      
+      - name: Generate coverage badge
+        run: |
+          mkdir -p .github/badges
+          genbadge coverage -i coverage.xml -o .github/badges/coverage.svg
+      - name: Commit badge
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .github/badges/coverage.svg
+          git commit -m "Update coverage badge" || exit 0
+          git push

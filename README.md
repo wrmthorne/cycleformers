@@ -3,9 +3,10 @@
 <div align="center">
 
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/cycleformers)](https://pypi.org/project/cycleformers/)
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
-<!-- ![Coverage](.github/badges/coverage.svg) -->
-<!-- [![Build Status](https://github.com/wrmthorne/cycleformers/workflows/CI-Pipeline/badge.svg)](https://github.com/wrmthorne/cycleformers/actions) -->
+[![Coverage](.github/badges/coverage.svg)](https://codecov.io/gh/wrmthorne/cycleformers)
+[![Build Status](.github/badges/build.svg)](https://github.com/wrmthorne/cycleformers/actions/workflows)
 
 </div>
 

@@ -21,3 +21,21 @@ jobs:
 
   build-docs:
     uses: ./.github/workflows/build-docs.yml
+
+  add-badge:
+    needs: [checks, build-docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate build badge
+        run: |
+          mkdir -p .github/badges
+          # If we got to this step, build succeeded
+          genbadge build -n "build" -s "passing" -c "green" -o .github/badges/build.svg
+
+      - name: Commit badges
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .github/badges/coverage.svg .github/badges/build.svg
+          git commit -m "Update badges" || exit 0
+          git push
