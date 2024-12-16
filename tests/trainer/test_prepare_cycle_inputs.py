@@ -3,19 +3,24 @@ from unittest.mock import Mock
 
 import pytest
 import torch
+from accelerate import Accelerator
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 
 from cycleformers import DEFAULT_SEP_SEQ, CycleTrainer
-from cycleformers.cycles import prepare_causal_skip_cycle_inputs
+from cycleformers.cycles import _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
 
 
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
 class BaseTestCycleInputs:
     @pytest.fixture(name="cycle_trainer")
-    def fixture_cycle_trainer(self):
+    def fixture_cycle_trainer(self, device):
         trainer = Mock(spec=CycleTrainer)
-        # Copy the real method to our mock
-        trainer._cycle_prepare_inputs = CycleTrainer._prepare_cycle_inputs.__get__(trainer)
+        accelerator = Mock(spec=Accelerator)
+        accelerator.device = device
+
+        trainer._prepare_cycle_inputs = CycleTrainer._prepare_cycle_inputs.__get__(trainer)
         trainer.sep_seq = DEFAULT_SEP_SEQ
+        trainer.accelerator = accelerator
         return trainer
 
     @pytest.fixture(name="tokenizer")
@@ -116,22 +121,24 @@ class TestPrepareCausalCycleInputs(BaseTestCycleInputs):
     @pytest.mark.parametrize(
         "prepare_fn",
         [
-            CycleTrainer._prepare_cycle_inputs,
-            prepare_causal_skip_cycle_inputs,
+            _default_prepare_cycle_inputs,
+            _prepare_causal_skip_cycle_inputs,
         ],
     )
     def test_prepare_cycle_inputs(self, causal_sample, cycle_trainer, model, tokenizer, prepare_fn):
         # Copy the real method to our mock
-        cycle_trainer._cycle_prepare_inputs = MethodType(prepare_fn, cycle_trainer)
+        bound_method = MethodType(prepare_fn, cycle_trainer)
+        setattr(cycle_trainer, "_prepare_cycle_inputs", bound_method)
+        causal_sample = {k: v.to(cycle_trainer.accelerator.device) for k, v in causal_sample.items()}
 
-        synth_batch = cycle_trainer._cycle_prepare_inputs(
+        synth_batch = cycle_trainer._prepare_cycle_inputs(
             causal_sample["real_input_ids"],
             causal_sample["synth_input_ids"],
             model,
             model,
             tokenizer,
             tokenizer,
-            "a",
+            "A",
         )
         # Test outputs
         assert torch.allclose(synth_batch["input_ids"], causal_sample["input_ids"])
@@ -180,21 +187,23 @@ class TestPrepareSeq2SeqCycleInputs(BaseTestCycleInputs):
     @pytest.mark.parametrize(
         "prepare_fn",
         [
-            CycleTrainer._prepare_cycle_inputs,
+            _default_prepare_cycle_inputs,
         ],
     )
     def test_prepare_cycle_inputs(self, seq2seq_sample, cycle_trainer, model, tokenizer, prepare_fn):
         # Copy the real method to our mock
-        cycle_trainer._cycle_prepare_inputs = MethodType(prepare_fn, cycle_trainer)
+        bound_method = MethodType(prepare_fn, cycle_trainer)
+        setattr(cycle_trainer, "_prepare_cycle_inputs", bound_method)
+        seq2seq_sample = {k: v.to(cycle_trainer.accelerator.device) for k, v in seq2seq_sample.items()}
 
-        synth_batch = cycle_trainer._cycle_prepare_inputs(
+        synth_batch = cycle_trainer._prepare_cycle_inputs(
             seq2seq_sample["real_input_ids"],
             seq2seq_sample["synth_input_ids"],
             model,
             model,
             tokenizer,
             tokenizer,
-            "a",
+            "A",
         )
         assert torch.allclose(synth_batch["input_ids"], seq2seq_sample["input_ids"])
         assert torch.allclose(synth_batch["attention_mask"], seq2seq_sample["attention_mask"])

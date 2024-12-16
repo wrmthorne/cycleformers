@@ -1,11 +1,76 @@
+from copy import copy
+
 import torch
 import torch.nn as nn
 from transformers.tokenization_utils_base import BatchEncoding, PreTrainedTokenizerBase
 
-from cycleformers.utils import DEFAULT_SEP_SEQ
+
+def _default_prepare_cycle_inputs(
+    self,
+    real_input_ids: torch.Tensor,
+    synth_input_ids: torch.Tensor,
+    model_gen: nn.Module,
+    model_train: nn.Module,
+    tokenizer_gen: PreTrainedTokenizerBase,
+    tokenizer_train: PreTrainedTokenizerBase,
+    cycle_name: str,
+) -> BatchEncoding | dict[str, torch.Tensor]:
+    """Default implementation for preparing cycle inputs. Implements all model permuations and acts as a fallback
+    in case an optimised function is not available.
+
+    TODO: Implementation currently does not handle causal-to-seq2seq or seq2seq-to-causal.
+    """
+    device = self.accelerator.device
+
+    if not model_gen.config.is_encoder_decoder:
+        synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1] :]
+
+    synth_batch_text = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
+
+    if not model_train.config.is_encoder_decoder:
+        input_texts = tokenizer_train.batch_decode(real_input_ids, skip_special_tokens=True)
+        # TODO: Investigate tokenizer_train.eos_token as separator to appear more like packed training instances
+        # TODO: Potentially add a configurable templating function here
+        synth_batch_responses = copy(synth_batch_text)
+        synth_batch_text = [
+            synth_text + self.sep_seq + input_text.strip(self.sep_seq) + tokenizer_train.eos_token
+            for synth_text, input_text in zip(synth_batch_text, input_texts)
+        ]
+
+    # Temporarily call padding_side in tokenizer to ensure position ids are correct for loss calculation
+    synth_batch = tokenizer_train(
+        synth_batch_text,
+        return_tensors="pt",
+        padding=True,
+        padding_side="right" if not model_train.config.is_encoder_decoder else tokenizer_train.padding_side,
+    ).to(device)
+
+    # Seq2seq just needs the real input ids as labels
+    synth_batch["labels"] = real_input_ids
+
+    # FIXME: Temporary solution to fix incorrect labelling - come back and
+    # implement a more efficient solution
+    if not model_train.config.is_encoder_decoder:
+        prompt_mask = torch.zeros_like(synth_batch["input_ids"])
+        for i, text in enumerate(synth_batch_responses):
+            prompt_len = (
+                tokenizer_train(
+                    text + self.sep_seq,
+                    return_tensors="pt",
+                    padding=False,
+                )
+                .input_ids.to(device)
+                .shape[-1]
+            )
+            prompt_mask[i, :prompt_len] = 1
+
+        synth_batch["labels"] = synth_batch["input_ids"].clone().to(device)  # Careful not to set eos token as -100
+        synth_batch["labels"][(synth_batch["attention_mask"] == 0) | (prompt_mask == 1)] = -100
+
+    return synth_batch
 
 
-def prepare_seq2seq_cycle_inputs(
+def _prepare_seq2seq_cycle_inputs(
     self,
     real_input_ids: torch.Tensor,
     synth_input_ids: torch.Tensor,
@@ -19,7 +84,7 @@ def prepare_seq2seq_cycle_inputs(
     raise NotImplementedError("Too much effort for very little gain at this point")
 
 
-def prepare_causal_skip_cycle_inputs(
+def _prepare_causal_skip_cycle_inputs(
     self,
     real_input_ids: torch.Tensor,
     synth_input_ids: torch.Tensor,
@@ -28,7 +93,6 @@ def prepare_causal_skip_cycle_inputs(
     tokenizer_gen: PreTrainedTokenizerBase,
     tokenizer_train: PreTrainedTokenizerBase,
     cycle_name: str,
-    # TODO: Needs device and sep_seq
 ) -> BatchEncoding | dict[str, torch.Tensor]:
     """An optimised function for handling the mid-cycle token processing for causal language models, that share an
     identical tokenizer. It will be incorrect or simply crash if used in a different context.
@@ -74,7 +138,7 @@ def prepare_causal_skip_cycle_inputs(
         >>> output['labels'].shape
         torch.Size([1, 7])
     """
-    SEP_SEQ_IDS = tokenizer_gen.encode(DEFAULT_SEP_SEQ, padding=False)
+    SEP_SEQ_IDS = tokenizer_gen.encode(self.sep_seq, padding=False)
     if SEP_SEQ_IDS[0] == tokenizer_gen.bos_token_id:
         SEP_SEQ_IDS = SEP_SEQ_IDS[1:]
     SEP_SEQ_LEN = len(SEP_SEQ_IDS)
@@ -82,7 +146,7 @@ def prepare_causal_skip_cycle_inputs(
     BATCH_SIZE, SEQ_LEN = synth_input_ids.shape
     INPUTS_WIDTH = PROMPT_WIDTH - SEP_SEQ_LEN
 
-    device = synth_input_ids.device
+    device = self.accelerator.device
 
     # Mask off all special tokens
     special_mask = (

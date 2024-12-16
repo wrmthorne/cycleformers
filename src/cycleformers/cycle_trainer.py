@@ -2,8 +2,8 @@ import math
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
-from copy import copy
 from pathlib import Path
+from types import MethodType
 
 import datasets
 import torch
@@ -31,6 +31,7 @@ from transformers.trainer_callback import (
 from transformers.trainer_utils import TrainOutput
 
 from .cycle_training_arguments import CycleTrainingArguments
+from .cycles import PrepareCycleInputsNotSet, _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
 from .utils import DEFAULT_SEP_SEQ, auto_temp_attributes
 
 
@@ -57,7 +58,7 @@ class CycleTrainer(Trainer):
                 raise ValueError("When using peft_configs, models should be a single model, not a dictionary")
             self.model_A = models["A"]
             self.model_B = models["B"]
-            self.is_peft_model = True
+            self.is_peft_model = False
         elif isinstance(models, PeftModel):
             adapter_names = list(models.peft_config)
             if "A" in adapter_names and "B" in adapter_names:
@@ -228,6 +229,8 @@ class CycleTrainer(Trainer):
                 cb for cb in self.callback_handler.callbacks + [self.control] if isinstance(cb, ExportableState)
             ],
         )
+
+        self.set_cycle_inputs_fn()
 
     def _prepare_dataset(
         self,
@@ -564,23 +567,32 @@ class CycleTrainer(Trainer):
 
         return metrics
 
-    def shift_padding_right(self, tensor, pad_id=0):
-        # Count number of non-pad tokens per row
-        nonpad_counts = (tensor != pad_id).sum(dim=1)
+    def set_cycle_inputs_fn(self, fn: Callable | None = None):
+        """
+        Setter method to control which mid cycle token preparation method to use from cycleformers.cycles
 
-        # Create indices tensor for scattering
-        seq_length = tensor.size(1)
-        device = tensor.device
-        indices = torch.arange(seq_length, device=device).unsqueeze(0).expand_as(tensor)
+        Method is called during class init but may be called by user post instantiation to force specific behaviour
+        without subclassing. If no arg is passed, this method will automatically select the best optimised method
+        for the given conditions.
+        """
+        try:
+            # User provided method
+            if fn is not None:
+                bound_method = MethodType(fn, self)
+            # TODO: Add better tokenizer equality check
+            # Both causal models that share a tokenizer from a tested model family
+            elif (
+                self.tokenizer_A == self.tokenizer_B
+                and not self.model_A.config.is_encoder_decoder
+                and not self.model_B.config.is_encoder_decoder
+            ):
+                bound_method = MethodType(_prepare_causal_skip_cycle_inputs, self)
+            else:
+                bound_method = MethodType(_default_prepare_cycle_inputs, self)
 
-        # Modify indices to achieve right padding
-        adjusted_indices = (indices - nonpad_counts.unsqueeze(1)) % seq_length
-
-        # Scatter the tensor according to new indices
-        result = torch.zeros_like(tensor)
-        result.scatter_(1, adjusted_indices, tensor)
-
-        return result
+            setattr(self, "_prepare_cycle_inputs", bound_method)
+        except Exception as e:
+            raise PrepareCycleInputsNotSet(f"Failed to set prepare_cycle_inputs: {e}")
 
     def _prepare_cycle_inputs(
         self,
@@ -600,49 +612,7 @@ class CycleTrainer(Trainer):
         Subclass and override this method to implement custom logic. The method should return a BatchEncoding object
         or equivalent dict with input_ids, attention_mask and labels.
         """
-        if not model_gen.config.is_encoder_decoder:
-            synth_input_ids = synth_input_ids[:, real_input_ids.shape[-1] :]
-
-        # TODO: Skip retokenization if tokenizers are identical
-        synth_batch_text = tokenizer_gen.batch_decode(synth_input_ids, skip_special_tokens=True)
-
-        if not model_train.config.is_encoder_decoder:
-            input_texts = tokenizer_train.batch_decode(real_input_ids, skip_special_tokens=True)
-            # TODO: Investigate tokenizer_train.eos_token as separator to appear more like packed training instances
-            # TODO: Potentially add a configurable templating function here
-            synth_batch_responses = copy(synth_batch_text)
-            synth_batch_text = [
-                synth_text + self.sep_seq + input_text.strip(self.sep_seq) + tokenizer_train.eos_token
-                for synth_text, input_text in zip(synth_batch_text, input_texts)
-            ]
-
-        # Temporarily call padding_side in tokenizer to ensure position ids are correct for loss calculation
-        synth_batch = tokenizer_train(
-            synth_batch_text,
-            return_tensors="pt",
-            padding=True,
-            padding_side="right" if not model_train.config.is_encoder_decoder else tokenizer_train.padding_side,
-        )
-
-        # Seq2seq just needs the real input ids as labels
-        synth_batch["labels"] = real_input_ids
-
-        # FIXME: Temporary solution to fix incorrect labelling - come back and
-        # implement a more efficient solution
-        if not model_train.config.is_encoder_decoder:
-            prompt_mask = torch.zeros_like(synth_batch["input_ids"])
-            for i, text in enumerate(synth_batch_responses):
-                prompt_len = tokenizer_train(
-                    text + self.sep_seq,
-                    return_tensors="pt",
-                    padding=False,
-                ).input_ids.shape[-1]
-                prompt_mask[i, :prompt_len] = 1
-
-            synth_batch["labels"] = synth_batch["input_ids"].clone()  # Careful not to set eos token as -100
-            synth_batch["labels"][(synth_batch["attention_mask"] == 0) | (prompt_mask == 1)] = -100
-
-        return synth_batch
+        raise PrepareCycleInputsNotSet()
 
     def evaluate(self, ignore_keys=None):
         metrics = {}

@@ -40,9 +40,7 @@ class CausalModelTestConfig:
 
 @pytest.fixture(name="lora_config")
 def fixture_lora_config(request):
-    task_type = getattr(request, "param", "SEQ_2_SEQ_LM")
     return LoraConfig(
-        task_type=task_type,
         r=8,
         lora_alpha=32,
     )
@@ -74,8 +72,8 @@ def fixture_causal_model(causal_config):
 
 
 @pytest.fixture(name="peft_causal_model")
-@pytest.mark.parametrize("lora_config", ["CAUSAL_LM"], indirect=True)
 def fixture_peft_causal_model(causal_model, lora_config):
+    lora_config.task_type = "CAUSAL_LM"
     model = get_peft_model(causal_model, lora_config, adapter_name="A")
     model.add_adapter("B", lora_config)
     return model
