@@ -1,3 +1,4 @@
+import gc
 from copy import copy
 
 import torch
@@ -15,10 +16,39 @@ def _default_prepare_cycle_inputs(
     tokenizer_train: PreTrainedTokenizerBase,
     cycle_name: str,
 ) -> BatchEncoding | dict[str, torch.Tensor]:
-    """Default implementation for preparing cycle inputs. Implements all model permuations and acts as a fallback
-    in case an optimised function is not available.
+    """Default implementation for preparing cycle inputs during cycle-consistency training.
 
-    TODO: Implementation currently does not handle causal-to-seq2seq or seq2seq-to-causal.
+    This function handles the core logic of preparing inputs for the cycle training loop. It processes both
+    encoder-decoder (seq2seq) and decoder-only (causal) model architectures, though some combinations are not
+    yet supported.
+
+    The function performs the following key steps:
+    1. For causal models, trims the synthetic input ids to remove prompt tokens
+    2. Decodes the synthetic tokens back to text
+    3. For causal models, combines synthetic text with original input using a separator
+    4. Tokenizes the processed text for the training model
+    5. Handles label creation differently for seq2seq vs causal models:
+        - For seq2seq: Uses original input ids directly as labels
+        - For causal: Creates labels with -100 for prompt tokens and padding
+
+    Args:
+        real_input_ids (torch.Tensor): Original input token IDs from the training data
+        synth_input_ids (torch.Tensor): Generated token IDs from the generative model
+        model_gen (nn.Module): The model used for generation (source of synth_input_ids)
+        model_train (nn.Module): The model being trained in this cycle
+        tokenizer_gen (PreTrainedTokenizerBase): Tokenizer for the generative model
+        tokenizer_train (PreTrainedTokenizerBase): Tokenizer for the training model
+        cycle_name (str): Identifier for the current cycle ('A' or 'B')
+
+    Returns:
+        BatchEncoding | dict[str, torch.Tensor]: Processed inputs ready for model training, including:
+            - input_ids: Token IDs for model input
+            - attention_mask: Attention mask for input tokens
+            - labels: Target labels for training (-100 for masked positions)
+
+    Note:
+        Currently does not support cross-architecture cycles (causal-to-seq2seq or seq2seq-to-causal).
+        Future implementations may add support for these combinations.
     """
     device = self.accelerator.device
 
@@ -107,6 +137,8 @@ def _prepare_causal_skip_cycle_inputs(
     3) Shift all padding tokens to the right
     4) Create attention masks and labels, handling EOS tokens properly when the pad token is the same as the eos token
 
+    CURRENTLY VALIDATED ON LLaMa-3.x and Qwen-2.5
+
     Args:
         real_input_ids (torch.Tensor): Batch of prompt token IDs [batch_size, prompt_width]
         synth_input_ids (torch.Tensor): Batch of generated sequence token IDs [batch_size, seq_len]
@@ -149,15 +181,17 @@ def _prepare_causal_skip_cycle_inputs(
     device = self.accelerator.device
 
     # Mask off all special tokens
-    special_mask = (
-        (synth_input_ids != tokenizer_gen.bos_token_id)
-        & (synth_input_ids != tokenizer_gen.eos_token_id)
-        & (synth_input_ids != tokenizer_gen.pad_token_id)
-    ).to(device)
+    special_mask = torch.ones_like(synth_input_ids).to(device)
+    if tokenizer_gen.bos_token_id is not None:
+        special_mask &= ~torch.eq(synth_input_ids, tokenizer_gen.bos_token_id)
+    if tokenizer_gen.eos_token_id is not None:
+        special_mask &= ~torch.eq(synth_input_ids, tokenizer_gen.eos_token_id)
+    if tokenizer_gen.pad_token_id is not None:
+        special_mask &= ~torch.eq(synth_input_ids, tokenizer_gen.pad_token_id)
 
     # Count number of tokens in prompt and response
-    prompt_lens = special_mask[:, :INPUTS_WIDTH, None].sum(dim=1).to(device)
-    response_lens = special_mask[:, PROMPT_WIDTH:, None].sum(dim=1).to(device)
+    prompt_lens = torch.sum(special_mask[:, :INPUTS_WIDTH, None], dim=1).to(device)
+    response_lens = torch.sum(special_mask[:, PROMPT_WIDTH:, None], dim=1).to(device)
 
     # Calculate how much to shift each part
     prompt_shifts = (response_lens + SEP_SEQ_LEN).to(device)
@@ -170,21 +204,23 @@ def _prepare_causal_skip_cycle_inputs(
     indices[:, PROMPT_WIDTH:] += special_mask[:, PROMPT_WIDTH:] * response_shifts
     indices[:, INPUTS_WIDTH:PROMPT_WIDTH] += special_mask[:, INPUTS_WIDTH:PROMPT_WIDTH] * separator_shifts
 
-    # Use BOS offset to shift padding to the right
-    indices += -(synth_input_ids == tokenizer_gen.bos_token_id).nonzero().to(device)[:, -1, None]
-    indices %= SEQ_LEN
+    # Use first non-special token as offset. +1 to offset if BOS token present
+    first_content_indices = -special_mask.to(torch.int64).argmax(dim=1)
+    indices += first_content_indices[:, None] + bool(tokenizer_gen.bos_token_id)
 
+    # Mod by length to wrap value around - cannot have negatives for scatter
+    indices %= SEQ_LEN
     input_ids = torch.zeros_like(synth_input_ids, device=device)
     input_ids.scatter_(1, indices, synth_input_ids)
 
-    # Right padded following scatter. EOS is always the first "pad" token
-    # Only necessary if pad token is eos token
+    # Right padded following scatter. EOS is always the first "PAD" token
+    # Only necessary if PAD token is EOS token
     attn_mask = input_ids != tokenizer_train.pad_token_id
     if tokenizer_train.eos_token_id == tokenizer_train.pad_token_id:
         eos_idxs = (~attn_mask & torch.roll(attn_mask, 1, dims=1)).nonzero()
         attn_mask[eos_idxs[:, 0], eos_idxs[:, 1]] = True
     else:
-        eos_idxs = (synth_input_ids == tokenizer_gen.eos_token_id).nonzero()
+        eos_idxs = torch.eq(synth_input_ids, tokenizer_gen.eos_token_id).nonzero()
 
     labels = torch.full_like(synth_input_ids, -100, device=device)
     special_mask[:, INPUTS_WIDTH:] = False
@@ -206,8 +242,11 @@ def _prepare_causal_skip_cycle_inputs(
         prompt_shifts,
         response_shifts,
         separator_shifts,
+        first_content_indices,
         indices,
     )
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
 
     return {"input_ids": input_ids, "attention_mask": attn_mask.to(torch.int64), "labels": labels}

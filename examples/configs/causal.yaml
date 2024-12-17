@@ -1,0 +1,19 @@
+### ONLY REQUIRED ARGUMENTS ###
+output_dir: "./outputs"
+###############################
+
+# === Training Arguments === #
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 4
+per_device_eval_batch_size: 4
+logging_strategy: steps
+logging_steps: 1
+
+
+# === Model Configs === #
+model_name_or_path: "Qwen/Qwen2.5-3B"
+
+
+# Optimisation
+# attn_implementation: "flash_attention_2"
+# use_liger_kernel: true

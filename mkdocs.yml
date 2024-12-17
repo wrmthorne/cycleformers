@@ -54,10 +54,14 @@ nav:
     - Cycle-Consistency Training: conceptual_reference/cycle_consistency_training.md
     - MACCT: conceptual_reference/macct.md
   - Examples:
-    - Examples: examples/index.md
+    - Example: examples/index.md
+    - CycleNER: examples/cycle_ner.md
+    - WMT2014: examples/wmt2014.md
   - API Reference:
     - CycleTrainer: api_reference/cycle_trainer.md
     - Configuration: api_reference/configuration.md
+    - Cycles: api_reference/cycles.md
+    - Task Processors: api_reference/task_processors.md
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -71,4 +75,12 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_code_format
 
 plugins:
-  - mkdocstrings
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [cycleformers]  # Path to your source code
+          options:
+            show_source: true
+            show_root_heading: true
+            heading_level: 1

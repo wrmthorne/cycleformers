@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from peft import get_peft_config
+
 
 @dataclass
 class ModelConfig:
@@ -42,15 +44,7 @@ class ModelConfig:
             Task type to pass for LoRA (use `"SEQ_CLS"` for reward modeling).
         use_rslora (`bool`, *optional*, defaults to `False`):
             Whether to use Rank-Stabilized LoRA, which sets the adapter scaling factor to `lora_alpha/√r`, instead of
-            the original default value of `lora_alpha/r`.
-        load_in_8bit (`bool`, *optional*, defaults to `False`):
-            Whether to use 8 bit precision for the base model. Works only with LoRA.
-        load_in_4bit (`bool`, *optional*, defaults to `False`):
-            Whether to use 4 bit precision for the base model. Works only with LoRA.
-        bnb_4bit_quant_type (`str`, *optional*, defaults to `"nf4"`):
-            Quantization type (`"fp4"` or `"nf4"`).
-        use_bnb_nested_quant (`bool`, *optional*, defaults to `False`):
-            Whether to use nested quantization."""
+            the original default value of `lora_alpha/r`."""
 
     model_name_or_path: str | None = None
     model_revision: str = "main"
@@ -66,7 +60,21 @@ class ModelConfig:
     lora_task_type: str = "CAUSAL_LM"
     use_rslora: bool = False
     use_dora: bool = False
-    # load_in_8bit: bool = False
-    # load_in_4bit: bool = False
-    # bnb_4bit_quant_type: Literal["fp4", "nf4"] = "nf4"
-    # use_bnb_nested_quant: bool = False
+
+    @property
+    def peft_config(self):
+        if not self.use_peft:
+            return None
+
+        return get_peft_config(
+            {
+                "peft_type": "LORA",
+                "task_type": self.lora_task_type,
+                "r": self.lora_r,
+                "lora_alpha": self.lora_alpha,
+                "lora_dropout": self.lora_dropout,
+                "target_modules": self.lora_target_modules,
+                "use_rslora": self.use_rslora,
+                "use_dora": self.use_dora,
+            }
+        )

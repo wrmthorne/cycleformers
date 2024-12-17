@@ -39,7 +39,7 @@ class BaseTestCycleInputs:
     @pytest.fixture(name="real_seq")
     def fixture_real_sequence(self):
         """Intentinally jagged to force padding (x10, x6)"""
-        self.real_fst = 10
+        self.real_fst = 16
         self.real_snd = 6
         self.real_seq = ["A" * self.real_fst, "A" * self.real_snd]
         return self.real_seq
@@ -48,7 +48,7 @@ class BaseTestCycleInputs:
     def fixture_synth_sequence(self):
         """Intentinally jagged to force padding (x8, x10)"""
         self.synth_fst = 8
-        self.synth_snd = 10
+        self.synth_snd = 20
         self.synth_seq = ["B" * self.synth_fst, "B" * self.synth_snd]
         return self.synth_seq
 
@@ -57,6 +57,7 @@ class BaseTestCycleInputs:
     "model_name",
     [
         "trl-internal-testing/tiny-LlamaForCausalLM-3.1",  # Llama tokenizer
+        "Qwen/Qwen2.5-0.5B",
         # "gpt2",  # GPT2 tokenizer
         # "facebook/opt-125m",  # OPT tokenizer (GPT based)
         # "EleutherAI/pythia-70m",  # Pythia/GPT-NeoX tokenizer (GPT based)

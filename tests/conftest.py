@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 import torch
@@ -10,7 +11,6 @@ from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokeni
 
 def pytest_addoption(parser):
     parser.addoption("--slow", action="store_true", help="Run slow tests")
-    parser.addoption("--meta", action="store_true", help="Run meta tests")
     parser.addoption(
         "--all", action="store_false", help="Run all (possible) tests"
     )  # TODO: Change back to store_true when ready
@@ -19,12 +19,14 @@ def pytest_addoption(parser):
 def pytest_collection_modifyitems(config, items):
     if not config.getoption("--all"):
         skip_slow = pytest.mark.skip(reason="specify --slow or --all to run")
-        skip_meta = pytest.mark.skip(reason="specify --meta or --all to run")
         for item in items:
             if "slow" in item.keywords and not config.getoption("--slow"):
                 item.add_marker(skip_slow)
-            if "meta" in item.keywords and not config.getoption("--meta"):
-                item.add_marker(skip_meta)
+    if not torch.cuda.is_available():
+        skip_gpu = pytest.mark.skip(reason="No GPU available")
+        for item in items:
+            if "requires_gpu" in item.keywords:
+                item.add_marker(skip_gpu)
 
 
 # TODO: replace with tiny-random-model

@@ -25,6 +25,7 @@ ruff = "^0.7.1"
 mypy = "^1.13.0"
 semantic-release = "^0.1.0"
 pytest-cov = "^6.0.0"
+genbadge = {extras = ["build", "coverage"], version = "^1.1.1"}
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
@@ -105,10 +106,24 @@ line-ending = "auto"
 module = "accelerate.*,datasets.*,transformers.*"
 ignore_missing_imports = true
 
-[tool.pytest]
+[tool.pytest.ini_options]
 markers = [
     "slow: mark test as slow to run",
-    "meta: mark test as testing fixtures or helper functions"
+    "requires_gpu: mark test as requiring a GPU or taking far too long to run on a CPU"
+]
+
+[tool.coverage.run]
+source = ["src/cycleformers"]
+omit = [
+    "tests/*",
+    "misc/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
 ]
 
 [tool.semantic_release]

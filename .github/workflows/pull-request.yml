@@ -7,6 +7,7 @@ on:
 
 permissions:
   pull-requests: read
+  contents: write
 
 jobs:
   check-pr-title:
@@ -21,3 +22,35 @@ jobs:
 
   build-docs:
     uses: ./.github/workflows/build-docs.yml
+
+  add-badge:
+    needs: [checks, build-docs]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-poetry
+        with:
+          python-version: 3.11
+      
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Generate build badge
+        run: |
+          mkdir -p .github/badges
+          # If we got to this step, build succeeded
+          poetry run genbadge build -n "build" -s "passing" -c "green" -o .github/badges/build.svg
+
+      - name: Commit badges
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          # Fetch and checkout the PR branch
+          git fetch origin ${{ github.head_ref }}
+          git checkout ${{ github.head_ref }}
+          git add .github/badges/coverage.svg .github/badges/build.svg
+          git commit -m "Update badges" || exit 0
+          git push origin ${{ github.head_ref }}

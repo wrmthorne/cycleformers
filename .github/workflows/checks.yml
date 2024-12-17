@@ -2,6 +2,9 @@ name: Code quality checks & tests
 on:
   workflow_call:
 
+permissions:
+  contents: write
+
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -26,6 +29,29 @@ jobs:
       - name: Run doctests
         run: poetry run python -m doctest **/*.py
 
-      - name: Run tests
-        run:
-          poetry run pytest --all
+      - name: Run tests with coverage
+        run: >
+          poetry run pytest
+          --cov=src/cycleformers
+          --cov-report=xml
+          --cov-report=term-missing tests/
+          tests/
+          --all
+          # --cov-fail-under=80
+      
+      - name: Generate coverage badge
+        run: |
+          mkdir -p .github/badges
+          poetry run genbadge coverage -i coverage.xml -o .github/badges/coverage.svg
+      
+      - name: Commit badge
+        if: github.event_name == 'pull_request'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          # Fetch and checkout the PR branch
+          git fetch origin ${{ github.head_ref }}
+          git checkout ${{ github.head_ref }}
+          git add .github/badges/coverage.svg
+          git commit -m "Update coverage badge" || exit 0
+          git push origin ${{ github.head_ref }}
