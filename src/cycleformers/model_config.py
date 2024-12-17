@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from peft import get_peft_config
-
 
 @dataclass
 class ModelConfig:
@@ -60,21 +58,3 @@ class ModelConfig:
     lora_task_type: str = "CAUSAL_LM"
     use_rslora: bool = False
     use_dora: bool = False
-
-    @property
-    def peft_config(self):
-        if not self.use_peft:
-            return None
-
-        return get_peft_config(
-            {
-                "peft_type": "LORA",
-                "task_type": self.lora_task_type,
-                "r": self.lora_r,
-                "lora_alpha": self.lora_alpha,
-                "lora_dropout": self.lora_dropout,
-                "target_modules": self.lora_target_modules,
-                "use_rslora": self.use_rslora,
-                "use_dora": self.use_dora,
-            }
-        )

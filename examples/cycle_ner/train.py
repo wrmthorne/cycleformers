@@ -4,7 +4,9 @@ from pathlib import Path
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, HfArgumentParser
 
 from cycleformers import CycleTrainer, CycleTrainingArguments, ModelConfig
+from cycleformers.import_utils import is_liger_available
 from cycleformers.task_processors.ner import CONLL2003Processor, CONLL2003ProcessorConfig
+from cycleformers.utils import get_peft_config
 
 
 def get_model_and_tokenizer(model_config, training_args):
@@ -21,7 +23,7 @@ def get_model_and_tokenizer(model_config, training_args):
         attn_implementation=model_config.attn_implementation,
         torch_dtype=model_config.torch_dtype,
         trust_remote_code=model_config.trust_remote_code,
-        # use_liger_kernel=training_args.use_liger_kernel,
+        # use_liger_kernel=training_args.use_liger_kernel and is_liger_available(),
         device_map="auto",
     )
 
@@ -42,8 +44,6 @@ def main():
     task_processor = CONLL2003Processor(conll_config)
     dataset_A, dataset_B = task_processor.process()
 
-    models, tokenizer = get_model_and_tokenizer(model_config, training_args)
-
     # FIXME: Don't force single model and tokenizer
     models, tokenizer = get_model_and_tokenizer(model_config, training_args)
     if not model_config.use_peft:
@@ -58,7 +58,7 @@ def main():
         train_dataset_B=dataset_B["train"],
         eval_dataset_A=dataset_A["eval"] if not training_args.eval_strategy == "no" else None,
         eval_dataset_B=dataset_B["eval"] if not training_args.eval_strategy == "no" else None,
-        peft_configs=model_config.peft_config,
+        peft_configs=get_peft_config(model_config),
     )
 
     trainer.train()

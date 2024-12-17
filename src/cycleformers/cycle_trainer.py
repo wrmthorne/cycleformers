@@ -750,6 +750,12 @@ class CycleTrainer(Trainer):
         model_train.train()
         metrics = {}
 
+        TEMP_GEN_ARGS = {
+            "max_new_tokens": 30,
+            "use_cache": True,
+            "do_sample": False,  # Significant speedup
+        }
+
         # Handle adapter switching for generation
         gen_adapter = self.adapter_B if cycle_name == "A" else self.adapter_A
         train_adapter = self.adapter_A if cycle_name == "A" else self.adapter_B
@@ -757,7 +763,10 @@ class CycleTrainer(Trainer):
         with self.switch_adapter(model_gen, gen_adapter):
             with torch.inference_mode():
                 synth_batch_ids = model_gen.generate(
-                    input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], max_new_tokens=100
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch["attention_mask"],
+                    **TEMP_GEN_ARGS,
+                    pad_token_id=tokenizer_gen.eos_token_id if tokenizer_gen.eos_token_id else None,
                 )
 
         # Prepare inputs using generated text
