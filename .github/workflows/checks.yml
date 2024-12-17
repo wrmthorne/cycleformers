@@ -2,6 +2,9 @@ name: Code quality checks & tests
 on:
   workflow_call:
 
+permissions:
+  contents: write
+
 jobs:
   checks:
     runs-on: ubuntu-latest
