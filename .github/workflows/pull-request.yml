@@ -45,8 +45,11 @@ jobs:
 
       - name: Commit badges
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          # Fetch and checkout the PR branch
+          git fetch origin ${{ github.head_ref }}
+          git checkout ${{ github.head_ref }}
           git add .github/badges/coverage.svg .github/badges/build.svg
           git commit -m "Update badges" || exit 0
-          git push
+          git push origin ${{ github.head_ref }}
