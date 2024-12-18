@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from .utils import prefixed_view
+
 
 @dataclass
 class ModelConfig:
@@ -58,3 +60,16 @@ class ModelConfig:
     lora_task_type: str = "CAUSAL_LM"
     use_rslora: bool = False
     use_dora: bool = False
+
+
+@prefixed_view(ModelConfig, "A_")
+class ModelConfigA:
+    pass
+
+
+@prefixed_view(ModelConfig, "B_")
+class ModelConfigB:
+    pass
+
+
+__all__ = ["ModelConfig", "ModelConfigA", "ModelConfigB"]

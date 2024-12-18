@@ -1,101 +1,104 @@
 import inspect
-from dataclasses import field, fields, make_dataclass
+from dataclasses import MISSING, fields
 from functools import wraps
-from typing import Any, Protocol, TypeVar, cast, get_type_hints
+from typing import get_type_hints
 
 from peft import LoraConfig
+from transformers.hf_argparser import DataClassType
 
 
 DEFAULT_SEP_SEQ = "\n\n"
 
 
-class DataclassProtocol(Protocol):
-    """Protocol defining the required interface for dataclass operations.
+def prefixed_view(base_class: DataClassType, prefix: str):
+    """Creates a dataclass-like decorator that provides a prefixed view of another dataclass.
+    When instantiated, returns an instance of the original dataclass with unprefixed attributes.
 
-    Attributes:
-        __dataclass_fields__: Dictionary mapping field names to field objects
-        __name__: Name of the dataclass
-        __dataclass_params__: Dataclass configuration parameters
-    """
-
-    __dataclass_fields__: dict[str, Any]
-    __name__: str
-    __dataclass_params__: Any
-
-
-T = TypeVar("T", bound=DataclassProtocol)
-
-
-def suffix_dataclass_factory(base_class: type[T], suffix: str = "_A") -> type[T]:
-    """Creates a new dataclass by appending a suffix to the base class name and all its fields.
-
-    This function creates a new dataclass that mirrors the structure of a base dataclass,
-    but with modified field names. It's useful for creating parallel configurations where
-    you need similar but distinct settings for different components.
+    This decorator allows you to create a class that acts as a view of another dataclass,
+    where all attributes are prefixed. When instantiating the prefixed class, it returns
+    an instance of the original dataclass with the prefixes removed.
 
     Args:
-        base_class (type[T]): Base dataclass to derive from
-        suffix (str, optional): Suffix to append to the base class name and fields. Defaults to "_A"
+        base_class: The original dataclass to create a view of
+        prefix: The prefix to add to all attribute names
 
     Returns:
-        type[T]: New dataclass with suffixed name and fields
+        A decorator function that creates the prefixed view class
 
-    Raises:
-        TypeError: If base_class is not a dataclass
-
-    Examples:
+    Example:
         >>> from dataclasses import dataclass
         >>> @dataclass
-        ... class BaseConfig:
-        ...     learning_rate: float = 0.001
-        ...     batch_size: int = 32
+        ... class Config:
+        ...     name: str
+        ...     value: int = 42
+        ...
+        >>> @prefixed_view(Config, "test_")
+        ... class TestConfig:
+        ...     pass
+        ...
+        >>> # The new class has prefixed type hints
+        >>> TestConfig.__annotations__
+        {'test_name': <class 'str'>, 'test_value': <class 'int'>}
         >>>
-        >>> ConfigA = suffix_dataclass_factory(BaseConfig, "_A")
-        >>> config_a = ConfigA(learning_rate_A=0.002, batch_size_A=64)
-        >>> config_a
-        ConfigA(learning_rate_A=0.002, batch_size_A=64)
-
-    Notes:
-        - The new dataclass is created without inheriting from the base class
-        - All field attributes (init, repr, compare, etc.) are preserved
-        - Default values and factory functions are maintained
+        >>> # Creating an instance with prefixed attributes
+        >>> config = TestConfig(test_name="example", test_value=100)
+        >>> config
+        Config(name='example', value=100)
+        >>>
+        >>> # Invalid attributes raise TypeError
+        >>> config = TestConfig(invalid_attr="test")  # doctest: +IGNORE_EXCEPTION_DETAIL
+        Traceback (most recent call last):
+            ...
+        TypeError: Unexpected argument: invalid_attr
+        >>>
+        >>> # Default values are preserved
+        >>> config = TestConfig(test_name="example")
+        >>> config
+        Config(name='example', value=42)
     """
-    if not hasattr(base_class, "__dataclass_fields__"):
-        raise TypeError("Base class must be a dataclass")
 
-    original_fields = fields(cast(Any, base_class))
-    type_hints = get_type_hints(base_class)
+    def wrapper(cls):
+        # Get original class type hints and fields
+        base_hints = get_type_hints(base_class)
+        base_fields = {f.name: f for f in fields(base_class)}
 
-    new_fields = []
-    for og_field in original_fields:
-        field_type = type_hints.get(og_field.name, Any)
-        new_field_name = og_field.name + suffix
+        # Create new fields with prefixed names but same types/defaults
+        new_annotations = {}
+        new_defaults = {}
 
-        # Create field with explicit parameters instead of dict
-        field_obj = field(
-            init=bool(og_field.init),
-            repr=bool(og_field.repr),
-            compare=bool(og_field.compare),
-            metadata=dict(og_field.metadata or {}),
-        )
+        for name, type_hint in base_hints.items():
+            prefixed_name = f"{prefix}{name}"
+            new_annotations[prefixed_name] = type_hint
 
-        # Handle default values
-        if og_field.default is not og_field.default_factory:
-            field_obj.default = og_field.default
-        if og_field.default_factory is not og_field.default_factory.__class__:
-            field_obj.default_factory = og_field.default_factory
+            # Copy default values if they exist
+            if name in base_fields:
+                field = base_fields[name]
+                if field.default is not MISSING:
+                    new_defaults[prefixed_name] = field.default
+                if field.default_factory is not MISSING:
+                    new_defaults[prefixed_name] = field.default_factory()
 
-        new_fields.append((new_field_name, field_type, field_obj))
+        # Add annotations and default values to the class
+        cls.__annotations__ = new_annotations
+        for name, value in new_defaults.items():
+            setattr(cls, name, value)
 
-    # Create new dataclass without inheriting from base class
-    new_class_name = base_class.__name__ + suffix.replace("_", "")
-    new_class = make_dataclass(
-        new_class_name,
-        new_fields,
-        bases=(),  # No inheritance
-        frozen=getattr(base_class, "__dataclass_params__").frozen,
-    )
-    return new_class
+        def __new__(cls, **kwargs):
+            # Validate input against our prefixed fields
+            for key in kwargs:
+                if key not in new_annotations:
+                    raise TypeError(f"Unexpected argument: {key}")
+
+            # Create mapping of unprefixed attributes
+            unprefixed_kwargs = {key[len(prefix) :]: value for key, value in kwargs.items()}
+
+            # Return instance of original dataclass
+            return base_class(**unprefixed_kwargs)
+
+        cls.__new__ = staticmethod(__new__)
+        return cls
+
+    return wrapper
 
 
 def auto_temp_attributes(*attrs_to_cleanup):
