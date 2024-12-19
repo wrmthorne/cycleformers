@@ -81,6 +81,7 @@ class TestSaveCheckpoint:
 
     def test_lora_adapters_save(self, peft_causal_model, causal_tokenizer, text_dataset):
         """Test that LoRA adapters are saved correctly"""
+        self.args.use_macct = True  # Needed to be activated
         trainer = CycleTrainer(
             args=self.args,
             models=peft_causal_model,
