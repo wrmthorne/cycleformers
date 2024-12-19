@@ -184,10 +184,10 @@ class TestSaveCheckpoint:
         finally:
             self.trainer.args.save_only_model = False
 
-    @pytest.mark.skip(reason="Will become relevant when separate model configs are implemented")
     def test_save_training_args(self):
         """Test that training arguments are saved correctly"""
         self.trainer._save_checkpoint(None, None)
         checkpoint_dir = self.save_dir / "checkpoint-0"
 
-        assert (checkpoint_dir / "training_args.bin").exists()
+        assert (checkpoint_dir / "A" / "training_args.bin").exists()
+        assert (checkpoint_dir / "B" / "training_args.bin").exists()
