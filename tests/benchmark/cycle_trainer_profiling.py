@@ -88,7 +88,7 @@ class ProfilingCycleTrainer(CycleTrainer):
 
 
 from cycleformers import CycleTrainer, CycleTrainingArguments, ModelConfig
-from cycleformers.import_utils import is_liger_available
+from cycleformers.import_utils import is_liger_kernel_available
 from cycleformers.task_processors.ner import CONLL2003Processor, CONLL2003ProcessorConfig
 from cycleformers.utils import get_peft_config
 
