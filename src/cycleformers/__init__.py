@@ -4,7 +4,7 @@ from .command import CFArgumentParser
 from .cycle_trainer import CycleTrainer
 from .cycle_training_arguments import CycleTrainingArguments
 from .data_config import DataConfig
-from .model_config import ModelConfig, ModelConfigA, ModelConfigB
+from .model_config import ModelConfig, ModelConfigA, ModelConfigB, merge_configs
 from .utils import DEFAULT_SEP_SEQ
 
 
@@ -17,4 +17,5 @@ __all__ = [
     "DataConfig",
     "DEFAULT_SEP_SEQ",
     "CFArgumentParser",
+    "merge_configs",
 ]

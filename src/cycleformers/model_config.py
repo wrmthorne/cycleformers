@@ -94,4 +94,57 @@ class ModelConfigB:
     pass
 
 
-__all__ = ["ModelConfig", "ModelConfigA", "ModelConfigB"]
+def merge_configs(base_config: ModelConfig, config_a: ModelConfigA, config_b: ModelConfigB) -> ModelConfig:
+    """Merge configs, with A/B specific values overriding base values, unless they're defaults.
+
+    Args:
+        base_config (ModelConfig): Base configuration with default values
+        config_a (ModelConfigA): Model A specific configuration that may override base values
+        config_b (ModelConfigB): Model B specific configuration that may override base values
+
+    Returns:
+        ModelConfig: The base config with A and B specific configs merged in
+
+    Example:
+        >>> base = ModelConfig(model_name="base", lora_r=32)
+        >>> a = ModelConfigA(A_model_name="model_a", A_lora_r=64)
+        >>> b = ModelConfigB(B_model_name="model_b")
+        >>> merged = merge_configs(base, a, b)
+        >>> merged.A.model_name
+        'model_a'
+        >>> merged.A.lora_r
+        64
+        >>> merged.B.model_name
+        'model_b'
+        >>> merged.B.lora_r
+        32
+    """
+    # Create copies to avoid modifying originals
+    merged_a = ModelConfig(**{k: getattr(base_config, k) for k in base_config.__dataclass_fields__})
+    merged_b = ModelConfig(**{k: getattr(base_config, k) for k in base_config.__dataclass_fields__})
+
+    # Create a default config to check against
+    default_config = ModelConfig()
+
+    # Override with A-specific values, but only if they're not defaults
+    for field in base_config.__dataclass_fields__:
+        if hasattr(config_a, field):
+            config_a_value = getattr(config_a, field)
+            # Only override if the A-specific value is different from default
+            if config_a_value != getattr(default_config, field):
+                setattr(merged_a, field, config_a_value)
+
+    # Override with B-specific values, but only if they're not defaults
+    for field in base_config.__dataclass_fields__:
+        if hasattr(config_b, field):
+            config_b_value = getattr(config_b, field)
+            # Only override if the B-specific value is different from default
+            if config_b_value != getattr(default_config, field):
+                setattr(merged_b, field, config_b_value)
+
+    base_config.A = merged_a
+    base_config.B = merged_b
+    return base_config
+
+
+__all__ = ["ModelConfig", "ModelConfigA", "ModelConfigB", "merge_configs"]

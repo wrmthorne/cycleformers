@@ -12,7 +12,13 @@ from accelerate import Accelerator
 from peft import PeftConfig, PeftModel, get_peft_model
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import DataCollatorForSeq2Seq, DataCollatorWithPadding, PreTrainedTokenizerBase, Trainer
+from transformers import (
+    DataCollatorForSeq2Seq,
+    DataCollatorWithPadding,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+    Trainer,
+)
 from transformers.integrations import get_reporting_integration_callbacks
 from transformers.trainer import (
     DEFAULT_CALLBACKS,
@@ -32,6 +38,7 @@ from transformers.trainer_utils import TrainOutput
 
 from .cycle_training_arguments import CycleTrainingArguments
 from .cycles import PrepareCycleInputsNotSet, _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
+from .import_utils import is_liger_kernel_available
 from .utils import DEFAULT_SEP_SEQ, auto_temp_attributes
 
 
@@ -149,19 +156,16 @@ class CycleTrainer(Trainer):
         peft_configs: PeftConfig | dict[str, PeftConfig] | None = None,
     ):
         self.args = args
+        self.is_macct_model = self.args.use_macct
 
         # Handle model initialization
         if isinstance(models, dict):
-            if peft_configs is not None:
-                raise ValueError("When using peft_configs, models should be a single model, not a dictionary")
             self.model_A = models["A"]
             self.model_B = models["B"]
-            self.is_peft_model = False
         elif isinstance(models, PeftModel):
             adapter_names = list(models.peft_config)
             if "A" in adapter_names and "B" in adapter_names:
                 self.model_A = self.model_B = models
-                self.is_peft_model = True
             else:
                 raise ValueError(f"Missing at least one adapter. Expecting 'A' and 'B' but got {adapter_names}")
         elif not isinstance(models, nn.Module):
@@ -175,7 +179,6 @@ class CycleTrainer(Trainer):
                 # Create model with first adapter
                 self.model_A = self.model_B = get_peft_model(models, peft_configs, adapter_name="A")
                 self.model_A.add_adapter("B", peft_configs)
-                self.is_peft_model = True
 
             elif isinstance(peft_configs, dict):
                 # Dictionary of configs
@@ -198,7 +201,6 @@ class CycleTrainer(Trainer):
                 for name, config in peft_configs.items():
                     if name != "A":
                         self.model_A.add_adapter(name, config)
-                self.is_peft_model = True
             else:
                 raise ValueError(
                     f"peft_configs must be a PeftConfig or dict[str, PeftConfig], got {type(peft_configs)}"
@@ -206,11 +208,31 @@ class CycleTrainer(Trainer):
         else:
             # TODO: Should this be allowed?
             self.model_A = self.model_B = models
-            self.is_peft_model = False
+
+        if self.args.use_liger_kernel:
+            if is_liger_kernel_available():
+                from liger_kernel.transformers import _apply_liger_kernel_to_instance  # type: ignore
+
+                for model in [self.model_A] + [self.model_B] if not self.is_macct_model else []:
+                    if isinstance(model, PreTrainedModel):
+                        # Patch the model with liger kernels. Use the default kernel configurations.
+                        _apply_liger_kernel_to_instance(model=model)
+                    elif isinstance(model.base_model.model, PreTrainedModel):
+                        # Patch the base model with liger kernels. Use the default kernel configurations.
+                        _apply_liger_kernel_to_instance(model=model.base_model.model)
+                    else:
+                        warnings.warn(
+                            "The model is not an instance of PreTrainedModel. No liger kernels will be applied."
+                        )
+            else:
+                raise ImportError(
+                    "You have set use_liger_kernel to True but liger-kernel >= 0.3.0 is not available. "
+                    "Please install it with pip install liger-kernel"
+                )
 
         # Store adapter names for convenience
-        self.adapter_A = "A" if self.is_peft_model else None
-        self.adapter_B = "B" if self.is_peft_model else None
+        self.adapter_A = "A" if self.is_macct_model else None
+        self.adapter_B = "B" if self.is_macct_model else None
 
         # Extract tokenizers from input
         if isinstance(tokenizers, dict):
@@ -219,6 +241,7 @@ class CycleTrainer(Trainer):
 
             if tokenizers["A"] == tokenizers["B"]:
                 tokenizer_A = tokenizer_B = tokenizers["A"]  # TODO: Find equality function for tokenizers
+
             else:
                 tokenizer_A = tokenizers["A"]
                 tokenizer_B = tokenizers["B"]
@@ -294,12 +317,12 @@ class CycleTrainer(Trainer):
 
         ## Setup model and dataloaders
         # TODO: Investigate just preparing lora_layers https://github.com/huggingface/diffusers/issues/4046
-        if self.is_peft_model:
+        if self.is_macct_model:
             # For PEFT models, we need to set the active adapter before creating optimizers
             self.model_A.set_adapter(self.adapter_A)
         self.optimizer_A, self.lr_scheduler_A = self.create_optimizer_and_scheduler(self.model_A, args.max_steps)
 
-        if self.is_peft_model:
+        if self.is_macct_model:
             self.model_B.set_adapter(self.adapter_B)
         self.optimizer_B, self.lr_scheduler_B = self.create_optimizer_and_scheduler(self.model_B, args.max_steps)
 
@@ -505,7 +528,7 @@ class CycleTrainer(Trainer):
         run_dir = self._get_output_dir(trial=trial)
         output_dir = Path(run_dir) / checkpoint_folder
 
-        if self.is_peft_model:
+        if self.is_macct_model:
             self.save_model(output_dir, self.model_A, _internal_call=True)
         else:
             self.save_model(output_dir / "A", self.model_A, _internal_call=True)
@@ -685,7 +708,7 @@ class CycleTrainer(Trainer):
     @contextmanager
     def switch_adapter(self, model: nn.Module, adapter_name: str | None = None):
         """Context manager to safely switch adapters and handle cleanup"""
-        if not self.is_peft_model or adapter_name is None:
+        if not self.is_macct_model or adapter_name is None:
             yield
             return
 

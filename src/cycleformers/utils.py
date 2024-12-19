@@ -6,6 +6,15 @@ from typing import get_type_hints
 from peft import LoraConfig
 from transformers.hf_argparser import DataClassType
 
+from .import_utils import is_liger_kernel_available
+
+
+if is_liger_kernel_available():
+    from liger_kernel.transformers.monkey_patch import MODEL_TYPE_TO_APPLY_LIGER_FN  # type: ignore
+
+    VALID_LIGER_MODELS = MODEL_TYPE_TO_APPLY_LIGER_FN.keys()
+else:
+    VALID_LIGER_MODELS = []
 
 DEFAULT_SEP_SEQ = "\n\n"
 

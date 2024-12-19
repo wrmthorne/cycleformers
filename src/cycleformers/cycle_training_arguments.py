@@ -14,6 +14,7 @@ class CycleTrainingArguments(TrainingArguments):
 
     use_macct: bool = False
     report_to: list[str] = field(default_factory=lambda: ["wandb"])
+    sep_seq: str = field(default="")
 
     def __post_init__(self):
         super().__post_init__()
