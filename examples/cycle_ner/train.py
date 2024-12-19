@@ -1,6 +1,3 @@
-import sys
-from pathlib import Path
-
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 
 from cycleformers import (
@@ -10,23 +7,33 @@ from cycleformers import (
     ModelConfig,
     ModelConfigA,
     ModelConfigB,
+    merge_configs,
 )
-from cycleformers.import_utils import is_liger_available
+from cycleformers.import_utils import is_liger_kernel_available
 from cycleformers.task_processors.ner import CONLL2003Processor, CONLL2003ProcessorConfig
-from cycleformers.utils import get_peft_config
+from cycleformers.utils import VALID_LIGER_MODELS, get_peft_config
+
+
+if is_liger_kernel_available():
+    from liger_kernel.transformers import AutoLigerKernelForCausalLM
 
 
 def get_model_and_tokenizer(model_config, training_args):
     """Initialize model and tokenizer from config"""
     config = AutoConfig.from_pretrained(
         model_config.model_name_or_path,
-        # cache_dir=training_args.cache_dir,
         trust_remote_code=model_config.trust_remote_code,
     )
     config.use_cache = False
 
+    model_kwargs = {}
+
     if not config.is_encoder_decoder:
-        model_class = AutoModelForCausalLM
+        if is_liger_kernel_available() and model_config.use_liger and config.model_type in VALID_LIGER_MODELS:
+            model_class = AutoLigerKernelForCausalLM
+            model_kwargs["use_liger_kernel"] = training_args.use_liger_kernel
+        else:
+            model_class = AutoModelForCausalLM
     else:
         model_class = AutoModelForSeq2SeqLM
 
@@ -34,11 +41,9 @@ def get_model_and_tokenizer(model_config, training_args):
         model_config.model_name_or_path,
         revision=model_config.model_revision,
         config=config,
-        # cache_dir=training_args.cache_dir,
         trust_remote_code=model_config.trust_remote_code,
         attn_implementation=model_config.attn_implementation,
         torch_dtype=model_config.torch_dtype,
-        # use_liger_kernel=training_args.use_liger_kernel and is_liger_available(),
         device_map="auto",
     )
 
@@ -50,27 +55,6 @@ def get_model_and_tokenizer(model_config, training_args):
 
     tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, use_fast=True)
     return model, tokenizer
-
-
-def merge_configs(base_config: ModelConfig, config_a: ModelConfigA, config_b: ModelConfigB) -> dict[str, ModelConfig]:
-    """Merge configs, with A/B specific values overriding base values."""
-    # Create copies to avoid modifying originals
-    merged_a = ModelConfig(**{k: getattr(base_config, k) for k in base_config.__dataclass_fields__})
-    merged_b = ModelConfig(**{k: getattr(base_config, k) for k in base_config.__dataclass_fields__})
-
-    # Override with A-specific values
-    for field in base_config.__dataclass_fields__:
-        if hasattr(config_a, field):
-            setattr(merged_a, field, getattr(config_a, field))
-
-    # Override with B-specific values
-    for field in base_config.__dataclass_fields__:
-        if hasattr(config_b, field):
-            setattr(merged_b, field, getattr(config_b, field))
-
-    base_config.A = merged_a
-    base_config.B = merged_b
-    return base_config
 
 
 def main():

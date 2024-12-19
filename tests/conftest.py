@@ -10,10 +10,8 @@ from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokeni
 
 
 def pytest_addoption(parser):
-    parser.addoption("--slow", action="store_true", help="Run slow tests")
-    parser.addoption(
-        "--all", action="store_false", help="Run all (possible) tests"
-    )  # TODO: Change back to store_true when ready
+    parser.addoption("--slow", action="store_false", help="Run slow tests")
+    parser.addoption("--all", action="store_false", help="Run all (possible) tests")
 
 
 def pytest_collection_modifyitems(config, items):

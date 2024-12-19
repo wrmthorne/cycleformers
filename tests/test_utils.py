@@ -2,7 +2,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import pytest
-from prefix_dataclass import prefixed_view
+
+from cycleformers.utils import prefixed_view
 
 
 # Test fixtures

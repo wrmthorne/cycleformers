@@ -7,9 +7,9 @@ import yaml
 
 
 yaml_base = {
-    "per_device_train_batch_size": 2,
-    "gradient_accumulation_steps": 2,
-    "per_device_eval_batch_size": 2,
+    "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 1,
+    "per_device_eval_batch_size": 1,
     "save_strategy": "steps",
     "max_steps": 3,
     "eval_steps": 1,
@@ -25,16 +25,24 @@ lora_config = {
     "lora_target_modules": "all-linear",
 }
 
-causal_yaml = (
-    {
-        # "model_name_or_path": "Qwen/Qwen2.5-0.5B",
-        "model_name_or_path": "trl-internal-testing/tiny-LlamaForCausalLM-3.1",  # TODO: Replace with QWen when tokenization skip works reliably
-    }
-    | yaml_base
-)
+causal_yaml = {
+    "model_name_or_path": "trl-internal-testing/tiny-LlamaForCausalLM-3.1",
+    "A": {
+        "model_name_or_path": "trl-internal-testing/tiny-LlamaForCausalLM-3.1",
+    },
+    "B": {
+        "model_name_or_path": "trl-internal-testing/tiny-LlamaForCausalLM-3.1",
+    },
+} | yaml_base
 
 seq2seq_yaml = {
     "model_name_or_path": "google/flan-t5-small",
+    "A": {
+        "model_name_or_path": "google/flan-t5-small",
+    },
+    "B": {
+        "model_name_or_path": "google/flan-t5-small",
+    },
 } | yaml_base
 
 causal_yaml_macct = {**lora_config, "lora_task_type": "CAUSAL_LM"} | causal_yaml
