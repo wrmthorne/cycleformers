@@ -61,12 +61,34 @@ class ModelConfig:
     use_rslora: bool = False
     use_dora: bool = False
 
+    def __post_init__(self):
+        self._A = None
+        self._B = None
 
+    @property
+    def A(self) -> "ModelConfig":
+        return self._A
+
+    @A.setter
+    def A(self, value: "ModelConfig"):
+        self._A = value
+
+    @property
+    def B(self) -> "ModelConfig":
+        return self._B
+
+    @B.setter
+    def B(self, value: "ModelConfig"):
+        self._B = value
+
+
+@dataclass
 @prefixed_view(ModelConfig, "A_")
 class ModelConfigA:
     pass
 
 
+@dataclass
 @prefixed_view(ModelConfig, "B_")
 class ModelConfigB:
     pass

@@ -3,15 +3,20 @@ output_dir: "./outputs"
 ###############################
 
 # === Training Arguments === #
-per_device_train_batch_size: 4
-gradient_accumulation_steps: 4
-per_device_eval_batch_size: 4
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 16
+per_device_eval_batch_size: 1
+gradient_checkpointing: true
 logging_strategy: steps
 logging_steps: 1
 
 
 # === Model Configs === #
-model_name_or_path: "Qwen/Qwen2.5-3B"
+A_model_name_or_path: "Qwen/Qwen2.5-1.5B"
+A_torch_dtype: "bfloat16"
+
+B_model_name_or_path: "Qwen/Qwen2.5-1.5B"
+B_torch_dtype: "bfloat16"
 
 
 # Optimisation
