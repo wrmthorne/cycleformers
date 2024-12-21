@@ -17,12 +17,12 @@ from cycleformers import CfArgumentParser, CycleTrainer, CycleTrainingArguments,
 from cycleformers.import_utils import is_liger_kernel_available
 from cycleformers.model_config import ModelConfigA, ModelConfigB, merge_configs
 from cycleformers.task_processors.ner import CONLL2003Processor, CONLL2003ProcessorConfig
-from cycleformers.utils import VALID_LIGER_MODELS, get_peft_config
+from cycleformers.utils import VALID_LIGER_MODELS, get_peft_config, print_trainable_params
 
 
 logger = logging.getLogger(__file__)
 
-MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT = 100000
+MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT = 1_000_000
 
 
 class ProfilingCycleTrainer(CycleTrainer):
@@ -47,6 +47,14 @@ class ProfilingCycleTrainer(CycleTrainer):
         # Save args to yaml file
         with open(self.profile_output_dir / "profiler_args.yaml", "w") as f:
             yaml.dump(self.args, f)
+
+        print("=" * 40)
+        print("Model A: ", end="")
+        print_trainable_params(self.model_A)
+        if not self.is_macct_model:
+            print("Model B: ", end="")
+            print_trainable_params(self.model_B)
+        print("=" * 40)
 
     def _log_gpu_memory(self):
         """Log current GPU memory usage"""

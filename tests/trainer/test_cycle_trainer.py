@@ -4,9 +4,87 @@ from pathlib import Path
 
 import pytest
 import torch
+from peft import PeftModel
+from peft.tuners.lora import LoraConfig
 
 from cycleformers import CycleTrainer, CycleTrainingArguments
 from cycleformers.cycles import _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
+
+
+# TODO: Rename when better defined
+@pytest.fixture(name="gen_peft_model")
+def fixture_gen_peft_model(request):
+    return request.param
+
+
+class TestCycleTrainerIntegration:
+    @pytest.mark.parametrize(
+        "peft_config",
+        [
+            None,
+            LoraConfig(r=8, lora_alpha=32),
+            {"A": LoraConfig(r=8, lora_alpha=16), "B": LoraConfig(r=16, lora_alpha=32)},
+        ],
+    )
+    def test_use_macct_with_single_model(self, causal_model, causal_tokenizer, peft_config, text_dataset):
+        args = CycleTrainingArguments(output_dir="/tmp/cycleformers_test", use_macct=True)
+        trainer = CycleTrainer(
+            args=args,
+            models=causal_model,
+            tokenizers=causal_tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+            peft_configs=peft_config,
+        )
+
+        assert trainer.is_macct_model
+        assert trainer.model_A is trainer.model_B
+        assert isinstance(trainer.model_A, PeftModel)
+        assert isinstance(trainer.model_B, PeftModel)
+        assert trainer.model_A.get_adapter("A") is not None
+        assert trainer.model_B.get_adapter("B") is not None
+
+        if peft_config is None:
+            assert trainer.model_A.get_adapter("A").r == 8
+            assert trainer.model_B.get_adapter("B").r == 8
+        elif isinstance(peft_config, LoraConfig):
+            assert trainer.model_A.get_adapter("A").r == peft_config.r
+            assert trainer.model_B.get_adapter("B").r == peft_config.r
+        elif isinstance(peft_config, dict):
+            assert trainer.model_A.get_adapter("A").r == peft_config["A"].r
+            assert trainer.model_B.get_adapter("B").r == peft_config["B"].r
+
+    @pytest.mark.parametrize(
+        "peft_model",
+        [
+            "gen_peft_model",
+            {
+                "model": "trl-internal-testing/tiny-LlamaForCausalLM-3.1",
+                "preloaded_adapters": None,
+                "lora_configs": None,
+            },
+            {
+                "model": "trl-internal-testing/tiny-LlamaForCausalLM-3.1",
+                "preloaded_adapters": ["A"],
+                "lora_configs": None,
+            },
+            {
+                "model": "trl-internal-testing/tiny-LlamaForCausalLM-3.1",
+                "preloaded_adapters": ["A", "B"],
+                "lora_configs": None,
+            },
+        ],
+    )
+    def test_is_macct_with_single_peft_model(self, model, tokenizer, preloaded_adapters, lora_configs, text_dataset):
+        args = CycleTrainingArguments(output_dir="/tmp/cycleformers_test", use_macct=True)
+        trainer = CycleTrainer(
+            args=args,
+            models=model,
+            tokenizers=tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+            peft_configs=lora_configs,
+        )
 
 
 class TestSetCycleInputsFn:

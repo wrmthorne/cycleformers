@@ -162,7 +162,7 @@ class CycleTrainer(Trainer):
         if isinstance(models, dict):
             self.model_A = models["A"]
             self.model_B = models["B"]
-        elif isinstance(models, PeftModel):
+        elif isinstance(models, PeftModel) and self.is_macct_model:
             adapter_names = list(models.peft_config)
             if "A" in adapter_names and "B" in adapter_names:
                 self.model_A = self.model_B = models
