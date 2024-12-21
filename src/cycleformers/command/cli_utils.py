@@ -6,10 +6,10 @@ import yaml
 from transformers.hf_argparser import DataClassType, HfArgumentParser
 
 
-TASKS = ["train"]
+VALID_TASKS = ["train"]
 
 
-class CFArgumentParser(HfArgumentParser):
+class CfArgumentParser(HfArgumentParser):
     def __init__(
         self,
         dataclass_types: list[DataClassType] | None = None,
@@ -48,20 +48,20 @@ class CFArgumentParser(HfArgumentParser):
         args = sys.argv[1:]
 
         # Handle task argument
-        if len(args) == 0:
-            raise ValueError(f"Task must be one of {TASKS}")
+        if not self.task and len(args) == 0:
+            raise ValueError(f"No task provided. Task must be one of {VALID_TASKS}.")
 
         # Task is already set
-        if self.task and args[0] in TASKS:
+        if self.task and args[0] in VALID_TASKS:
             raise ValueError(f"Task already set by script to {self.task}. Try again without {args[0]}.")
         # Task is not set and arg is a valid task
         elif not self.task:
-            if args[0] in TASKS:
+            if args[0] in VALID_TASKS:
                 self.task = args.pop(0)
             else:
-                raise ValueError(f"Task must be one of {TASKS}, got {args[0]}")
+                raise ValueError(f"Task must be one of {VALID_TASKS}, got {args[0]}")
 
-        if args[0].endswith(".yaml") or args[0].endswith(".yml"):
+        if len(args) > 0 and (args[0].endswith(".yaml") or args[0].endswith(".yml")):
             config_file = args.pop(0)
             file_args = self._parse_yaml_config(config_file)
             args = file_args + args

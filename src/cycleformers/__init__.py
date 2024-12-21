@@ -1,6 +1,6 @@
 __version__ = "0.1.0"
 
-from .command import CFArgumentParser
+from .command import CfArgumentParser
 from .cycle_trainer import CycleTrainer
 from .cycle_training_arguments import CycleTrainingArguments
 from .data_config import DataConfig
@@ -16,6 +16,6 @@ __all__ = [
     "ModelConfigB",
     "DataConfig",
     "DEFAULT_SEP_SEQ",
-    "CFArgumentParser",
+    "CfArgumentParser",
     "merge_configs",
 ]

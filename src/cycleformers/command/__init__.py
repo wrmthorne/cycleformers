@@ -1,4 +1,4 @@
-from .cli_utils import CFArgumentParser
+from .cli_utils import CfArgumentParser
 
 
-__all__ = ["CFArgumentParser"]
+__all__ = ["CfArgumentParser"]

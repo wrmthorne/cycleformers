@@ -1,7 +1,7 @@
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
 
 from cycleformers import (
-    CFArgumentParser,
+    CfArgumentParser,
     CycleTrainer,
     CycleTrainingArguments,
     ModelConfig,
@@ -58,7 +58,7 @@ def get_model_and_tokenizer(model_config, training_args):
 
 
 def main():
-    parser = CFArgumentParser(
+    parser = CfArgumentParser(
         (CycleTrainingArguments, ModelConfig, ModelConfigA, ModelConfigB, CONLL2003ProcessorConfig), task="train"
     )
     args, model_config_base, model_config_A, model_config_B, conll_config = parser.parse_args_and_config()
