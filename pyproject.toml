@@ -31,6 +31,7 @@ genbadge = {extras = ["build", "coverage"], version = "^1.1.1"}
 memory-profiler = "^0.61.0"
 snakeviz = "^2.2.2"
 torch-tb-profiler = "^0.4.3"
+tensorboard-plugin-profile = "^2.18.0"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"

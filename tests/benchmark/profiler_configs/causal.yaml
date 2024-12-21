@@ -1,5 +1,5 @@
 ### ONLY REQUIRED ARGUMENTS ###
-output_dir: "./outputs"
+output_dir: "/tmp/profiler_outputs"
 ###############################
 
 # === Training Arguments === #
@@ -8,8 +8,10 @@ gradient_accumulation_steps: 8
 per_device_eval_batch_size: 2
 logging_strategy: steps
 logging_steps: 1
+report_to: "tensorboard"
 
-max_steps: 10
+
+max_steps: 100
 
 
 # === Model Configs === #
