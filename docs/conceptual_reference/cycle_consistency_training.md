@@ -7,3 +7,5 @@ Cycle-consistency training (CCT) creates a closed feedback loop between source a
 For tasks such as text generation, we must sample discrete tokens from the model's continuous output distribution, breaking the gradient flow. In these settings, $f(g(x))$ is non-differentiable, preventing us from using the standard CCT loss. While CCT enforces a closed loop within each training batch, iterative back translation (IBT) avoids the same optimization issue by using one model to generate synthetic parallel data for the other to use as input. Each cycle therefore has a separate loss function and optimiser, alternating between training each model ([Gou et al. 2020](https://arxiv.org/abs/2006.04702)).
 
 📈 GRAPH TO BE INSERTED HERE
+
+
