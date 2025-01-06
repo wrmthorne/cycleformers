@@ -1,121 +1,159 @@
-from dataclasses import dataclass
+import random
+import tempfile
+from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 from datasets import Dataset
-from peft import LoraConfig, get_peft_model
 from torch.optim import AdamW
-from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    PreTrainedModel,
+    PreTrainedTokenizer,
+)
+
+from cycleformers.import_utils import is_peft_available
+
+from .testing_utils.model_registry import CapabilityExpression, ModelCapability, ModelRegistry, ModelSpec
+
+
+if is_peft_available():
+    from peft import LoraConfig, get_peft_model
+
+
+DEFAULT_MODEL_REGISTRY_PATH = Path(__file__).parent / "models_to_test.yaml"
 
 
 def pytest_addoption(parser):
-    parser.addoption("--slow", action="store_false", help="Run slow tests")
-    parser.addoption("--all", action="store_false", help="Run all (possible) tests")
+    parser.addoption(
+        "--slow", action="store_true", help="Run slow tests. Randomly selects one valid model for each test."
+    )
+    parser.addoption("--meta", action="store_true", help="Run tests of testing harness components.")
+    parser.addoption(
+        "--all", action="store_true", help="Run all tests possible on hardware. Runs all valid models for each test."
+    )
+    parser.addoption("--no-gpu", action="store_false", help="Skip tests that require a GPU.")
+    parser.addoption(
+        "--model-registry", action="store", default=DEFAULT_MODEL_REGISTRY_PATH, help="Path to model registry"
+    )
 
 
 def pytest_collection_modifyitems(config, items):
-    if not config.getoption("--all"):
-        skip_slow = pytest.mark.skip(reason="specify --slow or --all to run")
-        for item in items:
-            if "slow" in item.keywords and not config.getoption("--slow"):
-                item.add_marker(skip_slow)
-    if not torch.cuda.is_available():
-        skip_gpu = pytest.mark.skip(reason="No GPU available")
-        for item in items:
-            if "requires_gpu" in item.keywords:
-                item.add_marker(skip_gpu)
+    run_all = config.getoption("--all")
+    run_slow = config.getoption("--slow") or run_all
+    run_meta = config.getoption("--meta") or run_all
+    run_gpu = not config.getoption("--no-gpu") and torch.cuda.is_available()
+
+    skip_slow = pytest.mark.skip(reason="Need --slow or --all option to run")
+    skip_meta = pytest.mark.skip(reason="Need --meta or --all option to run")
+    skip_gpu = pytest.mark.skip(reason="Need GPU to run and --no-gpu not set")
+
+    for item in items:
+        if "slow" in item.keywords and not run_slow:
+            item.add_marker(skip_slow)
+        if "meta" in item.keywords and not run_meta:
+            item.add_marker(skip_meta)
+        if "gpu" in item.keywords and not run_gpu:
+            item.add_marker(skip_gpu)
 
 
-# TODO: replace with tiny-random-model
-# TODO: add config tests for other architectures
-@dataclass
-class Seq2SeqModelTestConfig:
-    model_name_or_path: str = "google/t5-efficient-tiny"
+@pytest.fixture
+def temp_dir():
+    """Provide temporary directory that's cleaned up after test."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
 
 
-@dataclass
-class CausalModelTestConfig:
-    model_name_or_path: str = "trl-internal-testing/tiny-LlamaForCausalLM-3.1"  # TODO: Make own tiny models
+@pytest.fixture(autouse=True)
+def set_random_seeds():
+    """Automatically set seeds before each test."""
+    torch.manual_seed(42)
+    random.seed(42)
+    np.random.seed(42)
 
 
-@pytest.fixture(name="seq2seq_config")
-def fixture_seq2seq_config() -> Seq2SeqModelTestConfig:
-    return Seq2SeqModelTestConfig()
+@pytest.fixture(scope="session")
+def model_registry() -> ModelRegistry:
+    """Record of all models used for testing."""
+    return ModelRegistry(Path(pytest.config.getoption("--model-registry")))
 
 
-@pytest.fixture(name="causal_config")
-def fixture_causal_config() -> CausalModelTestConfig:
-    return CausalModelTestConfig()
+@lru_cache(maxsize=None)
+def load_model_and_tokenizer(model_spec: ModelSpec) -> PreTrainedModel:
+    """Cache model loading to speed up tests."""
+    tokenizer = AutoTokenizer.from_pretrained(model_spec.repo_id)
+
+    if ModelCapability.SEQ2SEQ in model_spec.capabilities:
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_spec.repo_id)
+    elif ModelCapability.CAUSAL in model_spec.capabilities:
+        model = AutoModelForCausalLM.from_pretrained(model_spec.repo_id)
+        if not tokenizer.pad_token_id:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+        tokenizer.padding_side = "left"
+    else:
+        raise ValueError(f"No model found for {model_spec.repo_id} with capabilities {model_spec.capabilities}")
+
+    return model, tokenizer
 
 
-@pytest.fixture(name="text")
-def fixture_text() -> str:
-    return "This is a test input"
+def get_specific_model(
+    model_registry: ModelRegistry,
+    capabilities: ModelCapability | CapabilityExpression | None = None,
+    model_names: list[str] | str | None = None,
+) -> ModelSpec:
+    """Returns a pytest fixture that parametrizes over all models matching the given capabilities and names."""
+    if pytest.config.getoption("--all"):
+        params = model_registry.get_matching_model(capabilities, model_names)
+    elif pytest.config.getoption("--slow"):
+        params = model_registry.get_random_model()
+    else:
+        pytest.skip("Need --slow or --all option to run.")
+
+    @pytest.fixture(params=params)
+    def _models_and_tokenizers(request) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
+        model_spec = request.param
+        if not isinstance(model_spec, ModelSpec):
+            pytest.skip(f"No models found with capabilities={capabilities} and names={model_names}")
+        return load_model_and_tokenizer(model_spec)
+
+    return _models_and_tokenizers
 
 
-@pytest.fixture(name="seq2seq_model")
-def fixture_seq2seq_model(seq2seq_config):
-    return AutoModelForSeq2SeqLM.from_pretrained(seq2seq_config.model_name_or_path)
+def get_specific_peft_model(
+    model_registry: ModelRegistry,
+    capabilities: ModelCapability | CapabilityExpression | None = None,
+    model_names: list[str] | str | None = None,
+    peft_config: LoraConfig | None = None,
+) -> ModelSpec:
+    """Returns a pytest fixture that parametrizes over all PEFT-adapted models matching the given capabilities and names."""
+    if not is_peft_available():
+        pytest.skip("PEFT is not installed")
+
+    base_model_fixture = get_specific_model(model_registry, capabilities, model_names)
+    peft_config = peft_config or LoraConfig(r=8, lora_alpha=16)
+
+    @pytest.fixture(params=base_model_fixture.params)
+    def _peft_models(request) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
+        model, tokenizer = base_model_fixture(request)
+        if isinstance(model, AutoModelForCausalLM):
+            peft_config.task_type = "CAUSAL_LM"
+        elif isinstance(model, AutoModelForSeq2SeqLM):
+            peft_config.task_type = "SEQ_2_SEQ_LM"
+        return get_peft_model(model, peft_config), tokenizer
+
+    return _peft_models
 
 
-@pytest.fixture(name="causal_model")
-def fixture_causal_model(causal_config):
-    return AutoModelForCausalLM.from_pretrained(causal_config.model_name_or_path)
+# ===== Common model fixtures ===== #
+any_model, any_tokenizer = get_specific_model()  # All models in the registry
+seq2seq_model, seq2seq_tokenizer = get_specific_model(capabilities=ModelCapability.SEQ2SEQ)
+causal_model, causal_tokenizer = get_specific_model(capabilities=ModelCapability.CAUSAL)
 
-
-@pytest.fixture(name="peft_causal_model")
-def fixture_peft_causal_model(causal_model):
-    lora_config = LoraConfig(
-        task_type="CAUSAL_LM",
-        r=8,
-        lora_alpha=16,
-    )
-    model = get_peft_model(causal_model, lora_config, adapter_name="A")
-    model.add_adapter("B", lora_config)
-    return model
-
-
-@pytest.fixture(name="seq2seq_tokenizer")
-def fixture_seq2seq_tokenizer(seq2seq_config):
-    return AutoTokenizer.from_pretrained(seq2seq_config.model_name_or_path)
-
-
-@pytest.fixture(name="causal_tokenizer")
-def fixture_causal_tokenizer(causal_config):
-    tokenizer = AutoTokenizer.from_pretrained(causal_config.model_name_or_path)
-    tokenizer.pad_token_id = tokenizer.eos_token_id
-    tokenizer.padding_side = "left"
-    return tokenizer
-
-
-@pytest.fixture(name="optimizer")
-def fixture_optimizer():
-    return AdamW
-
-
-@pytest.fixture(name="seq2seq_inputs")
-def fixture_seq2seq_inputs(text, seq2seq_tokenizer):
-    return seq2seq_tokenizer(text, return_tensors="pt")
-
-
-@pytest.fixture(name="text_dataset")
-def fixture_text_dataset():
-    text = ["This is a test input", "This is another test input", "This is a third and final test input"]
-    labels = [
-        "This is an acknowledgement",
-        "This is another acknowledgement",
-        "This is a third and final acknowledgement",
-    ]
-    return Dataset.from_dict({"text": text, "labels": labels})
-
-
-@pytest.fixture(name="tokenized_dataset")
-def fixture_tokenized_dataset(causal_tokenizer, text_dataset):
-    dataset = text_dataset.map(
-        lambda x: {
-            **causal_tokenizer(x["text"], return_tensors="pt"),
-            "labels": causal_tokenizer(x["labels"], return_tensors="pt")["input_ids"],
-        }
-    ).remove_columns(["text"])
-    return dataset
+if is_peft_available():
+    any_peft_model, any_peft_tokenizer = get_specific_peft_model()
+    seq2seq_peft_model, seq2seq_peft_tokenizer = get_specific_peft_model(capabilities=ModelCapability.SEQ2SEQ)
+    causal_peft_model, causal_peft_tokenizer = get_specific_peft_model(capabilities=ModelCapability.CAUSAL)
