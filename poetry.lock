@@ -536,6 +536,20 @@ files = [
 ]
 
 [[package]]
+name = "execnet"
+version = "2.1.1"
+description = "execnet: rapid multi-Python deployment"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "execnet-2.1.1-py3-none-any.whl", hash = "sha256:26dee51f1b80cebd6d0ca8e74dd8745419761d3bef34163928cbebbdc4749fdc"},
+    {file = "execnet-2.1.1.tar.gz", hash = "sha256:5189b52c6121c24feae288166ab41b32549c7e2348652736540b9e6e7d4e72e3"},
+]
+
+[package.extras]
+testing = ["hatch", "pre-commit", "pytest", "tox"]
+
+[[package]]
 name = "filelock"
 version = "3.16.1"
 description = "A platform independent file lock."
@@ -2109,6 +2123,17 @@ dev = ["black", "check-manifest", "coverage", "packaging", "pylint", "pyperf", "
 test = ["pytest", "pytest-xdist", "setuptools"]
 
 [[package]]
+name = "py-cpuinfo"
+version = "9.0.0"
+description = "Get CPU info with pure Python"
+optional = false
+python-versions = "*"
+files = [
+    {file = "py-cpuinfo-9.0.0.tar.gz", hash = "sha256:3cdbbf3fac90dc6f118bfd64384f309edeadd902d7c8fb17f02ffa1fc3f49690"},
+    {file = "py_cpuinfo-9.0.0-py3-none-any.whl", hash = "sha256:859625bc251f64e21f077d099d4162689c762b5d6a4c3c97553d56241c9674d5"},
+]
+
+[[package]]
 name = "pyarrow"
 version = "18.1.0"
 description = "Python library for Apache Arrow"
@@ -2215,6 +2240,26 @@ pluggy = ">=1.5,<2"
 dev = ["argcomplete", "attrs (>=19.2)", "hypothesis (>=3.56)", "mock", "pygments (>=2.7.2)", "requests", "setuptools", "xmlschema"]
 
 [[package]]
+name = "pytest-benchmark"
+version = "5.1.0"
+description = "A ``pytest`` fixture for benchmarking code. It will group the tests into rounds that are calibrated to the chosen timer."
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "pytest-benchmark-5.1.0.tar.gz", hash = "sha256:9ea661cdc292e8231f7cd4c10b0319e56a2118e2c09d9f50e1b3d150d2aca105"},
+    {file = "pytest_benchmark-5.1.0-py3-none-any.whl", hash = "sha256:922de2dfa3033c227c96da942d1878191afa135a29485fb942e85dff1c592c89"},
+]
+
+[package.dependencies]
+py-cpuinfo = "*"
+pytest = ">=8.1"
+
+[package.extras]
+aspect = ["aspectlib"]
+elasticsearch = ["elasticsearch"]
+histogram = ["pygal", "pygaljs", "setuptools"]
+
+[[package]]
 name = "pytest-cov"
 version = "6.0.0"
 description = "Pytest plugin for measuring coverage."
@@ -2231,6 +2276,116 @@ pytest = ">=4.6"
 
 [package.extras]
 testing = ["fields", "hunter", "process-tests", "pytest-xdist", "virtualenv"]
+
+[[package]]
+name = "pytest-flakefinder"
+version = "1.1.0"
+description = "Runs tests multiple times to expose flakiness."
+optional = false
+python-versions = ">=3.5"
+files = [
+    {file = "pytest-flakefinder-1.1.0.tar.gz", hash = "sha256:e2412a1920bdb8e7908783b20b3d57e9dad590cc39a93e8596ffdd493b403e0e"},
+    {file = "pytest_flakefinder-1.1.0-py2.py3-none-any.whl", hash = "sha256:741e0e8eea427052f5b8c89c2b3c3019a50c39a59ce4df6a305a2c2d9ba2bd13"},
+]
+
+[package.dependencies]
+pytest = ">=2.7.1"
+
+[[package]]
+name = "pytest-instafail"
+version = "0.5.0"
+description = "pytest plugin to show failures instantly"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "pytest-instafail-0.5.0.tar.gz", hash = "sha256:33a606f7e0c8e646dc3bfee0d5e3a4b7b78ef7c36168cfa1f3d93af7ca706c9e"},
+    {file = "pytest_instafail-0.5.0-py3-none-any.whl", hash = "sha256:6855414487e9e4bb76a118ce952c3c27d3866af15487506c4ded92eb72387819"},
+]
+
+[package.dependencies]
+pytest = ">=5"
+
+[[package]]
+name = "pytest-picked"
+version = "0.5.1"
+description = "Run the tests related to the changed files"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "pytest_picked-0.5.1-py3-none-any.whl", hash = "sha256:af65c4763b51dc095ae4bc5073a962406902422ad9629c26d8b01122b677d998"},
+    {file = "pytest_picked-0.5.1.tar.gz", hash = "sha256:6634c4356a560a5dc3dba35471865e6eb06bbd356b56b69c540593e9d5620ded"},
+]
+
+[package.dependencies]
+pytest = ">=3.7.0"
+
+[[package]]
+name = "pytest-pspec"
+version = "0.0.4"
+description = "A rspec format reporter for Python ptest"
+optional = false
+python-versions = "*"
+files = [
+    {file = "pytest-pspec-0.0.4.tar.gz", hash = "sha256:5c0b0c9e964d5066cc5f2a2e1b296ad1313abbf58c4fd75014553fdf65bfe67a"},
+    {file = "pytest_pspec-0.0.4-py2.py3-none-any.whl", hash = "sha256:f80cc46f8896524bfe68750f3a5324bad8d4cb5112e90004bfdaafb7248e5cfd"},
+]
+
+[package.dependencies]
+pytest = ">=3.0.0"
+six = ">=1.11.0"
+
+[[package]]
+name = "pytest-random-order"
+version = "1.1.1"
+description = "Randomise the order in which pytest tests are run with some control over the randomness"
+optional = false
+python-versions = ">=3.5.0"
+files = [
+    {file = "pytest-random-order-1.1.1.tar.gz", hash = "sha256:4472d7d34f1f1c5f3a359c4ffc5c13ed065232f31eca19c8844c1ab406e79080"},
+    {file = "pytest_random_order-1.1.1-py3-none-any.whl", hash = "sha256:882727a8b597ecd06ede28654ffeb8a6d511a1e4abe1054cca7982f2e42008cd"},
+]
+
+[package.dependencies]
+pytest = ">=3.0.0"
+
+[[package]]
+name = "pytest-sugar"
+version = "1.0.0"
+description = "pytest-sugar is a plugin for pytest that changes the default look and feel of pytest (e.g. progressbar, show tests that fail instantly)."
+optional = false
+python-versions = "*"
+files = [
+    {file = "pytest-sugar-1.0.0.tar.gz", hash = "sha256:6422e83258f5b0c04ce7c632176c7732cab5fdb909cb39cca5c9139f81276c0a"},
+    {file = "pytest_sugar-1.0.0-py3-none-any.whl", hash = "sha256:70ebcd8fc5795dc457ff8b69d266a4e2e8a74ae0c3edc749381c64b5246c8dfd"},
+]
+
+[package.dependencies]
+packaging = ">=21.3"
+pytest = ">=6.2.0"
+termcolor = ">=2.1.0"
+
+[package.extras]
+dev = ["black", "flake8", "pre-commit"]
+
+[[package]]
+name = "pytest-xdist"
+version = "3.6.1"
+description = "pytest xdist plugin for distributed testing, most importantly across multiple CPUs"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "pytest_xdist-3.6.1-py3-none-any.whl", hash = "sha256:9ed4adfb68a016610848639bb7e02c9352d5d9f03d04809919e2dafc3be4cca7"},
+    {file = "pytest_xdist-3.6.1.tar.gz", hash = "sha256:ead156a4db231eec769737f57668ef58a2084a34b2e55c4a8fa20d861107300d"},
+]
+
+[package.dependencies]
+execnet = ">=2.1"
+pytest = ">=7.0.0"
+
+[package.extras]
+psutil = ["psutil (>=3.0)"]
+setproctitle = ["setproctitle"]
+testing = ["filelock"]
 
 [[package]]
 name = "python-dateutil"
@@ -2772,6 +2927,20 @@ protobuf = ">=3.19.6,<5.0.0dev"
 setuptools = ">=41.0.0"
 six = ">=1.10.0"
 werkzeug = ">=0.11.15"
+
+[[package]]
+name = "termcolor"
+version = "2.5.0"
+description = "ANSI color formatting for output in terminal"
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "termcolor-2.5.0-py3-none-any.whl", hash = "sha256:37b17b5fc1e604945c2642c872a3764b5d547a48009871aea3edd3afa180afb8"},
+    {file = "termcolor-2.5.0.tar.gz", hash = "sha256:998d8d27da6d48442e8e1f016119076b690d962507531df4890fcd2db2ef8a6f"},
+]
+
+[package.extras]
+tests = ["pytest", "pytest-cov"]
 
 [[package]]
 name = "tokenizers"
@@ -3359,4 +3528,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<3.13"
-content-hash = "927794312a78b737ed59f89b47b0ef9c47a4fcff90257b53aa096856a24e22a6"
+content-hash = "e2f31481dc75624f7b81ae2db1091fa7d3a83ac23937f3d17dfca7f9e06b39b8"
