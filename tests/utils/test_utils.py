@@ -28,8 +28,6 @@ class FrozenConfig:
 
 class TestPrefixedView:
     def test_basic_creation(self):
-        """Test basic creation of prefixed view class"""
-
         @prefixed_view(SimpleConfig, "test_")
         class TestConfig:
             pass
@@ -45,8 +43,6 @@ class TestPrefixedView:
         ],
     )
     def test_valid_instances(self, input_values, expected):
-        """Test creation of instances with valid inputs"""
-
         @prefixed_view(SimpleConfig, "test_")
         class TestConfig:
             pass
@@ -64,8 +60,6 @@ class TestPrefixedView:
         ],
     )
     def test_prefix_styles(self, prefix):
-        """Test different prefix styles"""
-
         @prefixed_view(SimpleConfig, prefix)
         class TestConfig:
             pass
@@ -74,8 +68,6 @@ class TestPrefixedView:
         assert all(name.startswith(prefix) for name in TestConfig.__annotations__)
 
     def test_default_factory(self):
-        """Test handling of default_factory fields"""
-
         @prefixed_view(ComplexConfig, "test_")
         class TestConfig:
             pass
@@ -87,8 +79,6 @@ class TestPrefixedView:
         assert instance.values == [1, 2, 3]
 
     def test_frozen_dataclass(self):
-        """Test with frozen dataclass"""
-
         @prefixed_view(FrozenConfig, "test_")
         class TestConfig:
             pass
@@ -105,7 +95,6 @@ class TestPrefixedView:
         ],
     )
     def test_creation_errors(self, invalid_base, prefix, expected_error):
-        """Test error cases for class creation"""
         with pytest.raises(expected_error):
 
             @prefixed_view(invalid_base, prefix)
@@ -113,8 +102,6 @@ class TestPrefixedView:
                 pass
 
     def test_nested_dataclass(self):
-        """Test handling of nested dataclasses"""
-
         @dataclass
         class NestedConfig:
             config: SimpleConfig
@@ -130,8 +117,6 @@ class TestPrefixedView:
         assert instance.name == "test"
 
     def test_inheritance(self):
-        """Test with inherited dataclass"""
-
         @dataclass
         class BaseConfig:
             name: str

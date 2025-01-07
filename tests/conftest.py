@@ -1,13 +1,13 @@
 import random
+import shutil
 import tempfile
 from functools import lru_cache
 from pathlib import Path
+from typing import Generator, Optional, Tuple, Union
 
 import numpy as np
 import pytest
 import torch
-from datasets import Dataset
-from torch.optim import AdamW
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -18,12 +18,16 @@ from transformers import (
 
 from cycleformers.import_utils import is_peft_available
 
-from .testing_utils.model_registry import CapabilityExpression, ModelCapability, ModelRegistry, ModelSpec
+from .testing_utils.model_registry import (
+    CapabilityExpression,
+    ModelCapability,
+    ModelRegistry,
+    ModelSpec,
+)
 
 
 if is_peft_available():
     from peft import LoraConfig, get_peft_model
-
 
 DEFAULT_MODEL_REGISTRY_PATH = Path(__file__).parent / "models_to_test.yaml"
 
@@ -66,6 +70,7 @@ def temp_dir():
     """Provide temporary directory that's cleaned up after test."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
+        shutil.rmtree(tmpdir)
 
 
 @pytest.fixture(autouse=True)
@@ -77,19 +82,19 @@ def set_random_seeds():
 
 
 @pytest.fixture(scope="session")
-def model_registry() -> ModelRegistry:
+def model_registry(request) -> ModelRegistry:
     """Record of all models used for testing."""
-    return ModelRegistry(Path(pytest.config.getoption("--model-registry")))
+    return ModelRegistry(Path(request.config.getoption("--model-registry")))
 
 
 @lru_cache(maxsize=None)
-def load_model_and_tokenizer(model_spec: ModelSpec) -> PreTrainedModel:
+def load_model_and_tokenizer(model_spec: ModelSpec) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
     """Cache model loading to speed up tests."""
     tokenizer = AutoTokenizer.from_pretrained(model_spec.repo_id)
 
-    if ModelCapability.SEQ2SEQ in model_spec.capabilities:
+    if ModelCapability.SEQ2SEQ_LM in model_spec.capabilities:
         model = AutoModelForSeq2SeqLM.from_pretrained(model_spec.repo_id)
-    elif ModelCapability.CAUSAL in model_spec.capabilities:
+    elif ModelCapability.CAUSAL_LM in model_spec.capabilities:
         model = AutoModelForCausalLM.from_pretrained(model_spec.repo_id)
         if not tokenizer.pad_token_id:
             tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -100,60 +105,56 @@ def load_model_and_tokenizer(model_spec: ModelSpec) -> PreTrainedModel:
     return model, tokenizer
 
 
-def get_specific_model(
-    model_registry: ModelRegistry,
-    capabilities: ModelCapability | CapabilityExpression | None = None,
-    model_names: list[str] | str | None = None,
-) -> ModelSpec:
-    """Returns a pytest fixture that parametrizes over all models matching the given capabilities and names."""
-    if pytest.config.getoption("--all"):
-        params = model_registry.get_matching_model(capabilities, model_names)
-    elif pytest.config.getoption("--slow"):
-        params = model_registry.get_random_model()
-    else:
-        pytest.skip("Need --slow or --all option to run.")
+def create_model_fixture(
+    capabilities: Optional[Union[ModelCapability, CapabilityExpression]] = None,
+    model_names: Optional[Union[list[str], str]] = None,
+    is_peft: bool = False,
+    peft_config: Optional[LoraConfig] = None,
+) -> pytest.fixture:
+    """Factory function to create model fixtures with specified capabilities."""
 
-    @pytest.fixture(params=params)
-    def _models_and_tokenizers(request) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
-        model_spec = request.param
-        if not isinstance(model_spec, ModelSpec):
+    @pytest.fixture
+    def model_fixture(request, model_registry) -> Generator[Tuple[PreTrainedModel, PreTrainedTokenizer], None, None]:
+        if not (request.config.getoption("--all") or request.config.getoption("--slow")):
+            pytest.skip("Need --slow or --all option to run")
+
+        if capabilities is not None or model_names is not None:
+            models = model_registry.get_matching_models(capabilities, model_names)
+        else:
+            models = model_registry.get_matching_models()
+
+        if not models:
             pytest.skip(f"No models found with capabilities={capabilities} and names={model_names}")
-        return load_model_and_tokenizer(model_spec)
 
-    return _models_and_tokenizers
+        # If --slow but not --all, randomly select one model
+        if not request.config.getoption("--all"):
+            models = [random.choice(models)]
 
+        for model_spec in models:
+            model, tokenizer = load_model_and_tokenizer(model_spec)
 
-def get_specific_peft_model(
-    model_registry: ModelRegistry,
-    capabilities: ModelCapability | CapabilityExpression | None = None,
-    model_names: list[str] | str | None = None,
-    peft_config: LoraConfig | None = None,
-) -> ModelSpec:
-    """Returns a pytest fixture that parametrizes over all PEFT-adapted models matching the given capabilities and names."""
-    if not is_peft_available():
-        pytest.skip("PEFT is not installed")
+            if is_peft:
+                if not is_peft_available():
+                    pytest.skip("PEFT is not installed")
 
-    base_model_fixture = get_specific_model(model_registry, capabilities, model_names)
-    peft_config = peft_config or LoraConfig(r=8, lora_alpha=16)
+                config = peft_config or LoraConfig(r=8, lora_alpha=16)
+                config.task_type = "CAUSAL_LM" if isinstance(model, AutoModelForCausalLM) else "SEQ_2_SEQ_LM"
+                model = get_peft_model(model, config)
 
-    @pytest.fixture(params=base_model_fixture.params)
-    def _peft_models(request) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
-        model, tokenizer = base_model_fixture(request)
-        if isinstance(model, AutoModelForCausalLM):
-            peft_config.task_type = "CAUSAL_LM"
-        elif isinstance(model, AutoModelForSeq2SeqLM):
-            peft_config.task_type = "SEQ_2_SEQ_LM"
-        return get_peft_model(model, peft_config), tokenizer
+            yield model, tokenizer
 
-    return _peft_models
+    return model_fixture
 
 
-# ===== Common model fixtures ===== #
-any_model, any_tokenizer = get_specific_model()  # All models in the registry
-seq2seq_model, seq2seq_tokenizer = get_specific_model(capabilities=ModelCapability.SEQ2SEQ)
-causal_model, causal_tokenizer = get_specific_model(capabilities=ModelCapability.CAUSAL)
+# Common model fixtures
+any_model_and_tokenizer = create_model_fixture()
+seq2seq_model_and_tokenizer = create_model_fixture(capabilities=ModelCapability.SEQ2SEQ_LM)
+causal_model_and_tokenizer = create_model_fixture(capabilities=ModelCapability.CAUSAL_LM)
+random_model_and_tokenizer = create_model_fixture()
 
+# PEFT model fixtures
 if is_peft_available():
-    any_peft_model, any_peft_tokenizer = get_specific_peft_model()
-    seq2seq_peft_model, seq2seq_peft_tokenizer = get_specific_peft_model(capabilities=ModelCapability.SEQ2SEQ)
-    causal_peft_model, causal_peft_tokenizer = get_specific_peft_model(capabilities=ModelCapability.CAUSAL)
+    any_peft_model_and_tokenizer = create_model_fixture(is_peft=True)
+    seq2seq_peft_model_and_tokenizer = create_model_fixture(capabilities=ModelCapability.SEQ2SEQ_LM, is_peft=True)
+    causal_peft_model_and_tokenizer = create_model_fixture(capabilities=ModelCapability.CAUSAL_LM, is_peft=True)
+    random_peft_model_and_tokenizer = create_model_fixture(is_peft=True)

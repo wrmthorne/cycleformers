@@ -28,7 +28,7 @@ class CapabilityExpression:
 
 
 class ModelCapability(Enum):
-    SEQ2SEQ = auto()
+    SEQ2SEQ_LM = auto()
     CAUSAL_LM = auto()
 
     @classmethod
@@ -61,7 +61,7 @@ def infer_capabilities_from_config(config: PretrainedConfig) -> set[ModelCapabil
 
     # Architecture-based capabilities
     if hasattr(config, "is_encoder_decoder") and config.is_encoder_decoder:
-        capabilities.add(ModelCapability.SEQ2SEQ)
+        capabilities.add(ModelCapability.SEQ2SEQ_LM)
 
     if hasattr(config, "architectures") and config.architectures:
         if any("ForCausalLM" in arch for arch in config.architectures):
@@ -77,6 +77,14 @@ class ModelSpec:
     capabilities: set[ModelCapability]
     config: PretrainedConfig
     description: str = ""  # Any notes that are important to remember about the model
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.repo_id))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ModelSpec):
+            return NotImplemented
+        return self.name == other.name and self.repo_id == other.repo_id
 
     @classmethod
     def from_hub(cls, name: str, repo_id: str) -> "ModelSpec":

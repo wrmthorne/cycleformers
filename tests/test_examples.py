@@ -6,6 +6,8 @@ import pytest
 import yaml
 
 
+SAMPLES_DIR = Path(__file__).parent / "sample_data"
+
 yaml_base = {
     "per_device_train_batch_size": 1,
     "gradient_accumulation_steps": 1,
@@ -50,15 +52,12 @@ causal_yaml_macct = {**lora_config, "lora_task_type": "CAUSAL_LM"} | causal_yaml
 seq2seq_yaml_macct = {**lora_config, "lora_task_type": "SEQ_2_SEQ_LM"} | seq2seq_yaml
 
 
-@pytest.fixture(scope="module")
-def tmp_dir():
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        yield tmp_dir
-
-
 @pytest.mark.slow
 @pytest.mark.requires_gpu
-@pytest.mark.parametrize("example_script", ["cycle_ner/train.py"])
+@pytest.mark.parametrize(
+    "example_script,dataset_name",
+    [("cycle_ner/train.py", SAMPLES_DIR / "conll2003"), ("translation_wmt14/train.py", SAMPLES_DIR / "wmt14")],
+)
 @pytest.mark.parametrize(
     "config_yaml",
     [
@@ -68,12 +67,13 @@ def tmp_dir():
         ("seq2seq-macct", "seq2seq-macct.yaml", seq2seq_yaml_macct),
     ],
 )
-def test_cycle_ner(example_script, config_yaml, tmp_dir):
+def test_cycle_ner(example_script, dataset_name, config_yaml, temp_dir):
     out_dirname, filename, config = config_yaml
-    out_dir = Path(tmp_dir) / out_dirname
+    out_dir = Path(temp_dir) / out_dirname
 
     config["output_dir"] = str(out_dir)
-    yaml_file = Path(tmp_dir) / filename
+    config["dataset_name"] = str(dataset_name)
+    yaml_file = Path(temp_dir) / filename
     with open(yaml_file, "w") as f:
         yaml.dump(config, f)
 
@@ -81,7 +81,7 @@ def test_cycle_ner(example_script, config_yaml, tmp_dir):
     while project_root.name != "cycleformers":
         project_root = project_root.parent
 
-    command = f"python {project_root}/examples/{example_script} {yaml_file}"
+    command = f"poetry run python {project_root}/examples/{example_script} {yaml_file}"
 
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
     # Check if the process completed successfully

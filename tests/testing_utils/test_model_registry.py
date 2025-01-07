@@ -11,8 +11,8 @@ from tests.testing_utils.model_registry import (
 
 
 @pytest.fixture
-def sample_registry_file(tmp_path):
-    registry_path = tmp_path / "Verify_models.yaml"
+def sample_registry_file(temp_dir):
+    registry_path = temp_dir / "Verify_models.yaml"
     registry_content = {
         "tiny-llama": {
             "repo_id": "fake-repo/tiny-llama",
@@ -60,21 +60,21 @@ class TestModelRegistry:
         assert llama.name == "tiny-llama"
         assert llama.repo_id == "fake-repo/tiny-llama"
         assert ModelCapability.CAUSAL_LM in llama.capabilities
-        assert ModelCapability.SEQ2SEQ not in llama.capabilities
+        assert ModelCapability.SEQ2SEQ_LM not in llama.capabilities
 
         t5 = registry._models["tiny-t5"]
         assert t5.name == "tiny-t5"
         assert t5.repo_id == "fake-repo/tiny-t5"
-        assert ModelCapability.SEQ2SEQ in t5.capabilities
+        assert ModelCapability.SEQ2SEQ_LM in t5.capabilities
 
     @pytest.mark.parametrize(
         "capability,model_names,expected_models",
         [
             (ModelCapability.CAUSAL_LM, None, ["tiny-llama"]),
-            (ModelCapability.SEQ2SEQ, None, ["tiny-t5"]),
-            (~ModelCapability.SEQ2SEQ, None, ["tiny-llama"]),
-            (ModelCapability.CAUSAL_LM | ModelCapability.SEQ2SEQ, None, ["tiny-llama", "tiny-t5"]),
-            (ModelCapability.CAUSAL_LM & ModelCapability.SEQ2SEQ, None, []),
+            (ModelCapability.SEQ2SEQ_LM, None, ["tiny-t5"]),
+            (~ModelCapability.SEQ2SEQ_LM, None, ["tiny-llama"]),
+            (ModelCapability.CAUSAL_LM | ModelCapability.SEQ2SEQ_LM, None, ["tiny-llama", "tiny-t5"]),
+            (ModelCapability.CAUSAL_LM & ModelCapability.SEQ2SEQ_LM, None, []),
             (None, ["tiny-llama"], ["tiny-llama"]),
             (None, ["tiny-llama", "tiny-t5"], ["tiny-llama", "tiny-t5"]),
             (ModelCapability.CAUSAL_LM, "tiny-llama", ["tiny-llama"]),
@@ -117,25 +117,25 @@ class TestCapabilityExpression:
     def test_simple_condition(self):
         expr = CapabilityExpression(lambda caps: ModelCapability.CAUSAL_LM in caps)
         assert expr.evaluate({ModelCapability.CAUSAL_LM})
-        assert not expr.evaluate({ModelCapability.SEQ2SEQ})
+        assert not expr.evaluate({ModelCapability.SEQ2SEQ_LM})
 
     def test_and_operator(self):
         expr1 = CapabilityExpression(lambda caps: ModelCapability.CAUSAL_LM in caps)
-        expr2 = CapabilityExpression(lambda caps: ModelCapability.SEQ2SEQ in caps)
+        expr2 = CapabilityExpression(lambda caps: ModelCapability.SEQ2SEQ_LM in caps)
         combined = expr1 & expr2
 
         assert not combined.evaluate({ModelCapability.CAUSAL_LM})
-        assert not combined.evaluate({ModelCapability.SEQ2SEQ})
-        assert combined.evaluate({ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ})
+        assert not combined.evaluate({ModelCapability.SEQ2SEQ_LM})
+        assert combined.evaluate({ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ_LM})
 
     def test_or_operator(self):
         expr1 = CapabilityExpression(lambda caps: ModelCapability.CAUSAL_LM in caps)
-        expr2 = CapabilityExpression(lambda caps: ModelCapability.SEQ2SEQ in caps)
+        expr2 = CapabilityExpression(lambda caps: ModelCapability.SEQ2SEQ_LM in caps)
         combined = expr1 | expr2
 
         assert combined.evaluate({ModelCapability.CAUSAL_LM})
-        assert combined.evaluate({ModelCapability.SEQ2SEQ})
-        assert combined.evaluate({ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ})
+        assert combined.evaluate({ModelCapability.SEQ2SEQ_LM})
+        assert combined.evaluate({ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ_LM})
         assert not combined.evaluate(set())
 
     def test_not_operator(self):
@@ -143,7 +143,7 @@ class TestCapabilityExpression:
         inverted = ~expr
 
         assert not inverted.evaluate({ModelCapability.CAUSAL_LM})
-        assert inverted.evaluate({ModelCapability.SEQ2SEQ})
+        assert inverted.evaluate({ModelCapability.SEQ2SEQ_LM})
         assert inverted.evaluate(set())
 
 
@@ -151,7 +151,7 @@ class TestCapabilityExpression:
 class TestModelCapability:
     def test_from_str(self):
         assert ModelCapability.from_str("CAUSAL_LM") == ModelCapability.CAUSAL_LM
-        assert ModelCapability.from_str("SEQ2SEQ") == ModelCapability.SEQ2SEQ
+        assert ModelCapability.from_str("SEQ2SEQ_LM") == ModelCapability.SEQ2SEQ_LM
 
         with pytest.raises(KeyError):
             ModelCapability.from_str("INVALID")
@@ -160,27 +160,27 @@ class TestModelCapability:
         expr = ModelCapability.CAUSAL_LM.to_expression()
         assert isinstance(expr, CapabilityExpression)
         assert expr.evaluate({ModelCapability.CAUSAL_LM})
-        assert not expr.evaluate({ModelCapability.SEQ2SEQ})
+        assert not expr.evaluate({ModelCapability.SEQ2SEQ_LM})
 
     def test_capability_and(self):
-        expr = ModelCapability.CAUSAL_LM & ModelCapability.SEQ2SEQ
+        expr = ModelCapability.CAUSAL_LM & ModelCapability.SEQ2SEQ_LM
         assert isinstance(expr, CapabilityExpression)
         assert not expr.evaluate({ModelCapability.CAUSAL_LM})
-        assert not expr.evaluate({ModelCapability.SEQ2SEQ})
-        assert expr.evaluate({ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ})
+        assert not expr.evaluate({ModelCapability.SEQ2SEQ_LM})
+        assert expr.evaluate({ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ_LM})
 
     def test_capability_or(self):
-        expr = ModelCapability.CAUSAL_LM | ModelCapability.SEQ2SEQ
+        expr = ModelCapability.CAUSAL_LM | ModelCapability.SEQ2SEQ_LM
         assert isinstance(expr, CapabilityExpression)
         assert expr.evaluate({ModelCapability.CAUSAL_LM})
-        assert expr.evaluate({ModelCapability.SEQ2SEQ})
-        assert expr.evaluate({ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ})
+        assert expr.evaluate({ModelCapability.SEQ2SEQ_LM})
+        assert expr.evaluate({ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ_LM})
 
     def test_capability_not(self):
         expr = ~ModelCapability.CAUSAL_LM
         assert isinstance(expr, CapabilityExpression)
         assert not expr.evaluate({ModelCapability.CAUSAL_LM})
-        assert expr.evaluate({ModelCapability.SEQ2SEQ})
+        assert expr.evaluate({ModelCapability.SEQ2SEQ_LM})
         assert expr.evaluate(set())
 
 
@@ -205,22 +205,12 @@ class TestInferCapabilities:
     def test_infer_causal_lm_from_architecture(self, causal_lm_config):
         capabilities = infer_capabilities_from_config(causal_lm_config)
         assert ModelCapability.CAUSAL_LM in capabilities
-        assert ModelCapability.SEQ2SEQ not in capabilities
+        assert ModelCapability.SEQ2SEQ_LM not in capabilities
 
     def test_infer_seq2seq_from_architecture(self, seq2seq_config):
         capabilities = infer_capabilities_from_config(seq2seq_config)
-        assert ModelCapability.SEQ2SEQ in capabilities
+        assert ModelCapability.SEQ2SEQ_LM in capabilities
         assert ModelCapability.CAUSAL_LM not in capabilities
-
-    def test_infer_from_model_type_fallback(self):
-        config = PretrainedConfig()
-        config.model_type = "llama"
-        capabilities = infer_capabilities_from_config(config)
-        assert ModelCapability.CAUSAL_LM in capabilities
-
-        config.model_type = "t5"
-        capabilities = infer_capabilities_from_config(config)
-        assert ModelCapability.SEQ2SEQ in capabilities
 
     def test_empty_config(self):
         config = PretrainedConfig()

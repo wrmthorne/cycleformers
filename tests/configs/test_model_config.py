@@ -53,7 +53,6 @@ class TestMergeConfigs:
                 assert result.B.lora_r == expected_b
 
     def test_merge_configs_preserves_base_values(self):
-        """Test that unmodified base values are preserved in both A and B configs"""
         base = ModelConfig(model_name_or_path="base", lora_r=32, trust_remote_code=True)
         config_a = ModelConfigA(A_model_name_or_path="model_a")
         config_b = ModelConfigB(B_model_name_or_path="model_b")
@@ -67,7 +66,6 @@ class TestMergeConfigs:
         assert result.B.trust_remote_code is True
 
     def test_merge_configs_list_handling(self):
-        """Test handling of list values in configs"""
         base = ModelConfig(lora_target_modules=["query", "value"])
         config_a = ModelConfigA(A_lora_target_modules=["key"])
         config_b = ModelConfigB(B_lora_target_modules=["output"])
@@ -78,7 +76,6 @@ class TestMergeConfigs:
         assert result.B.lora_target_modules == ["output"]
 
     def test_merge_configs_original_unmodified(self):
-        """Test that original configs remain unmodified after merge"""
         base = ModelConfig(model_name_or_path="base", lora_r=32)
         config_a = ModelConfigA(A_model_name_or_path="model_a", A_lora_r=64)
         config_b = ModelConfigB(B_model_name_or_path="model_b", B_lora_r=128)
@@ -92,6 +89,3 @@ class TestMergeConfigs:
         # Check original configs weren't modified
         assert base.model_name_or_path == original_base_model
         assert base.lora_r == original_base_lora_r
-
-
-# Add tests here
