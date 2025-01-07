@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from os import PathLike
+from pathlib import Path
 
-from datasets import DatasetDict
+from datasets import DatasetDict, load_dataset, load_from_disk
 
 
 @dataclass
@@ -12,9 +14,13 @@ class ProcessorConfig:
     Each specific processor can extend this with additional task-specific parameters.
     """
 
+    dataset_name: str | PathLike[str] | None = None
     eval_split_ratio: float = 0.2
     dataset_seed: int = 42
     cache_dir: str | None = None
+    # split: list[str] | str | None = None FIXME: not a key feature right now - taking too much time
+    max_samples: int | None = None
+    streaming: bool = False  # FIXME: not a key feature right now - taking too much time
 
 
 class BaseProcessor(ABC):
@@ -45,10 +51,19 @@ class BaseProcessor(ABC):
     def __init__(self, config: ProcessorConfig = ProcessorConfig()):
         self.config = config
 
-    @abstractmethod
     def load(self) -> DatasetDict:
-        """Load the source dataset."""
-        raise NotImplementedError
+        """Load the source dataset. Override for custom loading logic."""
+        if self.config.dataset_name is None:
+            raise ValueError("No dataset name was provided. Cannot load `None`.")
+
+        if Path(self.config.dataset_name).exists():
+            return load_from_disk(self.config.dataset_name)
+
+        return load_dataset(
+            self.config.dataset_name,
+            cache_dir=self.config.cache_dir,
+            streaming=self.config.streaming,
+        )
 
     @abstractmethod
     def preprocess(self, dataset: DatasetDict) -> DatasetDict:

@@ -4,7 +4,7 @@ from datasets import DatasetDict, load_dataset
 
 
 def prepare_wmt14_en_de_datasets(num_samples=5000, test_size=100):
-    dataset = load_dataset("stas/wmt14-en-de-pre-processed", split="train")
+    dataset = load_dataset("wmt/wmt14", split="train")
     dataset = dataset.map(
         lambda x: {"english": x["translation"]["en"], "german": x["translation"]["de"]}
     ).remove_columns(["translation"])
