@@ -96,7 +96,6 @@ class ModelSpec:
 class ModelRegistry:
     def __init__(self, registry_path: Path):
         self._models: dict[str, ModelSpec] = {}
-        self._random_history: Counter[str] = Counter()  # Ensures that different models get used
         self.load_registry(registry_path)
 
     def load_registry(self, registry_path: Path):
@@ -115,29 +114,30 @@ class ModelRegistry:
 
         Args:
             capability_expr: Capability expression to match. Can be a ModelCapability or a CapabilityExpression.
+                If None, no capability filtering is applied.
             model_names: List of model names to match. Can be a single string or a list of strings.
+                If None, no name filtering is applied.
 
         Returns:
             List of models matching both the capability expression and model names.
-            If no capability expression is provided, all models are returned.
-            If no model names are provided, all models are considered.
+            If both capability_expr and model_names are None, returns all models.
 
         Examples:
             >>> registry = ModelRegistry(Path("models_to_test.yaml"))
             >>> # Find models that are NOT seq2seq
-            >>> models = registry.get_matching_models(~ModelCapability.SEQ2SEQ)
+            >>> models = registry.get_matching_models(~ModelCapability.SEQ2SEQ_LM)
 
             >>> # Find models that are causal LM
             >>> models = registry.get_matching_models(ModelCapability.CAUSAL_LM)
 
             >>> # Find models that are either causal LM or seq2seq
             >>> models = registry.get_matching_models(
-            ...     ModelCapability.CAUSAL_LM | ModelCapability.SEQ2SEQ
+            ...     ModelCapability.CAUSAL_LM | ModelCapability.SEQ2SEQ_LM
             ... )
 
             >>> # Find models that are both causal LM and seq2seq (empty list)
             >>> models = registry.get_matching_models(
-            ...     ModelCapability.CAUSAL_LM & ModelCapability.SEQ2SEQ
+            ...     ModelCapability.CAUSAL_LM & ModelCapability.SEQ2SEQ_LM
             ... )
 
             >>> # Get specific models by name
@@ -145,7 +145,7 @@ class ModelRegistry:
 
             >>> # Combine capability and name filters
             >>> models = registry.get_matching_models(
-            ...     capability_expr=ModelCapability.SEQ2SEQ,
+            ...     capability_expr=ModelCapability.SEQ2SEQ_LM,
             ...     model_names=["tiny-t5"]
             ... )
 
@@ -177,16 +177,3 @@ class ModelRegistry:
             matches.append(spec)
 
         return matches
-
-    def get_random_matching_model(
-        self, capability_expr: ModelCapability | CapabilityExpression = None, model_names: list[str] = None
-    ) -> ModelSpec:
-        """Get a random model matching the capability expression or model names"""
-        matches = self.get_matching_models(capability_expr, model_names)
-        if not matches:
-            raise ValueError(f"No models match criteria: caps={capability_expr}, names={model_names}")
-
-        matches.sort(key=lambda x: self._random_history.get(x.name, 0))
-        selected = matches[0]
-        self._random_history[selected.name] = self._random_history.get(selected.name, 0) + 1
-        return selected

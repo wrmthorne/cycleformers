@@ -88,29 +88,6 @@ class TestModelRegistry:
         matches = registry.get_matching_models(capability, model_names=model_names)
         assert sorted([m.name for m in matches]) == sorted(expected_models)
 
-    def test_get_random_matching_model_history(self, sample_registry_file, mock_config_test):
-        registry = ModelRegistry(sample_registry_file)
-
-        # First call should return first model (sorted by usage count)
-        model1 = registry.get_random_matching_model()
-        assert registry._random_history[model1.name] == 1
-
-        # Second call should return different model
-        model2 = registry.get_random_matching_model()
-        assert model2.name != model1.name
-        assert registry._random_history[model2.name] == 1
-
-        # Third call should return model1 again as they're now equal
-        model3 = registry.get_random_matching_model()
-        assert model3.name == model1.name
-        assert registry._random_history[model1.name] == 2
-
-    def test_get_random_matching_model_no_matches(self, sample_registry_file, mock_config_test):
-        registry = ModelRegistry(sample_registry_file)
-
-        with pytest.raises(ValueError, match="No models match criteria"):
-            registry.get_random_matching_model(model_names=["non-existent-model"])
-
 
 @pytest.mark.meta
 class TestCapabilityExpression:

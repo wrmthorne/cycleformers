@@ -47,12 +47,37 @@ class TrainerTestMixin:
         return Dataset.from_dict({"text": ["Hello world", "How are you?", "Testing is fun"]})
 
     @pytest.fixture
-    def default_trainer(self, random_model_and_tokenizer, text_dataset):
+    def default_trainer(self, any_model_and_tokenizer_pairs, text_dataset):
         """Create a default trainer instance with common configuration."""
-        model, tokenizer = random_model_and_tokenizer
+        model_and_tokenizer_A, model_and_tokenizer_B = any_model_and_tokenizer_pairs
+        model_A, tokenizer_A = model_and_tokenizer_A
+        model_B, tokenizer_B = model_and_tokenizer_B
+
         return CycleTrainer(
             args=self.default_args,
-            models={"A": model, "B": model.clone()},
+            models={"A": model_A, "B": model_B},
+            tokenizers={"A": tokenizer_A, "B": tokenizer_B},
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+
+    @pytest.fixture
+    def causal_trainer(self, causal_model_and_tokenizer, text_dataset):
+        model, tokenizer = causal_model_and_tokenizer
+        return CycleTrainer(
+            args=self.default_args,
+            models=model,
+            tokenizers=tokenizer,
+            train_dataset_A=text_dataset,
+            train_dataset_B=text_dataset,
+        )
+
+    @pytest.fixture
+    def seq2seq_trainer(self, seq2seq_model_and_tokenizer, text_dataset):
+        model, tokenizer = seq2seq_model_and_tokenizer
+        return CycleTrainer(
+            args=self.default_args,
+            models=model,
             tokenizers=tokenizer,
             train_dataset_A=text_dataset,
             train_dataset_B=text_dataset,
@@ -100,15 +125,18 @@ class TestCycleTrainerMACCT(TrainerTestMixin):
             {"A": LoraConfig(r=8, lora_alpha=16), "B": LoraConfig(r=16, lora_alpha=32)},  # Different configs
         ],
     )
-    def test_use_macct_with_single_model(self, causal_model, causal_tokenizer, peft_config, text_dataset):
+    def test_use_macct_with_single_model(self, causal_model_and_tokenizer, peft_config, text_dataset):
         """Test MACCT initialization with different PEFT configurations."""
         args = self.default_args
         args.use_macct = True
 
+        model_and_tokenizer, _ = causal_model_and_tokenizer
+        model, tokenizer = model_and_tokenizer
+
         trainer = CycleTrainer(
             args=args,
-            models=causal_model,
-            tokenizers=causal_tokenizer,
+            models=model,
+            tokenizers=tokenizer,
             train_dataset_A=text_dataset,
             train_dataset_B=text_dataset,
             peft_configs=peft_config,
@@ -134,14 +162,14 @@ class TestCycleTrainerMACCT(TrainerTestMixin):
             assert trainer.model_B.get_adapter("B").r == peft_config["B"].r
 
     @pytest.mark.slow
-    def test_macct_training_cycle(self, any_model_and_tokenizer, text_dataset):
+    def test_macct_training_cycle(self, any_peft_model_and_tokenizer, text_dataset):
         """Test a complete MACCT training cycle."""
         args = self.default_args
         args.use_macct = True
         args.num_train_epochs = 1
         args.max_steps = 2
 
-        model, tokenizer = any_model_and_tokenizer
+        model, tokenizer = any_peft_model_and_tokenizer
         trainer = CycleTrainer(
             args=args,
             models=model,
@@ -155,16 +183,18 @@ class TestCycleTrainerMACCT(TrainerTestMixin):
         self.assert_checkpoint_exists(checkpoint_dir, is_macct=True)
 
     @pytest.mark.parametrize("save_only_model", [True, False], ids=["model_only", "full_checkpoint"])
-    def test_macct_checkpoint_saving(self, causal_model, causal_tokenizer, text_dataset, save_only_model):
+    def test_macct_checkpoint_saving(self, random_peft_model_and_tokenizer, text_dataset, save_only_model):
         """Test checkpoint saving behavior with MACCT models."""
         args = self.default_args
         args.use_macct = True
         args.save_only_model = save_only_model
 
+        model, tokenizer = random_peft_model_and_tokenizer
+
         trainer = CycleTrainer(
             args=args,
-            models=causal_model,
-            tokenizers=causal_tokenizer,
+            models=model,
+            tokenizers=tokenizer,
             train_dataset_A=text_dataset,
             train_dataset_B=text_dataset,
         )
@@ -209,15 +239,16 @@ class TestSetCycleInputsFn(TrainerTestMixin):
         default_trainer.set_cycle_inputs_fn()
         assert default_trainer._prepare_cycle_inputs.__func__ == _prepare_causal_skip_cycle_inputs
 
-    def test_set_default_seq2seq(self, seq2seq_model_and_tokenizer, causal_model_and_tokenizer, text_dataset):
+    def test_set_default(self, diff_model_and_tokenizer_pairs, text_dataset):
         """Test default cycle inputs function for mixed model types."""
-        causal_model, causal_tokenizer = causal_model_and_tokenizer
-        seq2seq_model, seq2seq_tokenizer = seq2seq_model_and_tokenizer
+        model_and_tokenizer_A, model_and_tokenizer_B = diff_model_and_tokenizer_pairs
+        model_A, tokenizer_A = model_and_tokenizer_A
+        model_B, tokenizer_B = model_and_tokenizer_B
 
         trainer = CycleTrainer(
             args=self.default_args,
-            models={"A": seq2seq_model, "B": causal_model},
-            tokenizers={"A": seq2seq_tokenizer, "B": causal_tokenizer},
+            models={"A": model_A, "B": model_B},
+            tokenizers={"A": tokenizer_A, "B": tokenizer_B},
             train_dataset_A=text_dataset,
             train_dataset_B=text_dataset,
         )

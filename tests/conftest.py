@@ -1,7 +1,9 @@
 import random
 import shutil
 import tempfile
+import warnings
 from functools import lru_cache
+from itertools import combinations, combinations_with_replacement
 from pathlib import Path
 from typing import Generator, Optional, Tuple, Union
 
@@ -118,10 +120,7 @@ def create_model_fixture(
         if not (request.config.getoption("--all") or request.config.getoption("--slow")):
             pytest.skip("Need --slow or --all option to run")
 
-        if capabilities is not None or model_names is not None:
-            models = model_registry.get_matching_models(capabilities, model_names)
-        else:
-            models = model_registry.get_matching_models()
+        models = model_registry.get_matching_models(capabilities, model_names)
 
         if not models:
             pytest.skip(f"No models found with capabilities={capabilities} and names={model_names}")
@@ -139,11 +138,50 @@ def create_model_fixture(
 
                 config = peft_config or LoraConfig(r=8, lora_alpha=16)
                 config.task_type = "CAUSAL_LM" if isinstance(model, AutoModelForCausalLM) else "SEQ_2_SEQ_LM"
-                model = get_peft_model(model, config)
+                model = get_peft_model(model, config, adapter_name="A")
 
             yield model, tokenizer
 
     return model_fixture
+
+
+def create_model_pairs_fixture(
+    capabilities: list[ModelCapability] = [ModelCapability.CAUSAL_LM, ModelCapability.SEQ2SEQ_LM],
+    allow_self_pairs: bool = True,
+) -> pytest.fixture:
+    """Randomly selects a model of each architecture and generates each unique permutation of models."""
+    if not capabilities:
+        raise ValueError("Capabilities must be left blank or be a non-empty list of ModelCapabilities")
+
+    @pytest.fixture
+    def model_pairs(
+        request, model_registry
+    ) -> Generator[
+        Tuple[Tuple[PreTrainedModel, PreTrainedTokenizer], Tuple[PreTrainedModel, PreTrainedTokenizer]], None, None
+    ]:
+        random.seed(42)
+        models = []
+        for capability in capabilities:
+            valid_models = model_registry.get_matching_models(capability)
+            if not valid_models:
+                warnings.warn(f"No models found with capability={capability}")
+                continue
+            models.append(random.choice(valid_models))
+
+        # All unique unordered pairs including with self
+        if allow_self_pairs:
+            model_pairs = list(combinations_with_replacement(models, 2))
+        else:
+            model_pairs = list(combinations(models, 2))
+
+        # Only return all models if --all is set. Always return at least one model pair
+        if not request.config.getoption("--all"):
+            model_pairs = [random.choice(model_pairs)]
+
+        for model_A, model_B in model_pairs:
+            yield load_model_and_tokenizer(model_A), load_model_and_tokenizer(model_B)
+
+    return model_pairs
 
 
 # Common model fixtures
@@ -158,3 +196,7 @@ if is_peft_available():
     seq2seq_peft_model_and_tokenizer = create_model_fixture(capabilities=ModelCapability.SEQ2SEQ_LM, is_peft=True)
     causal_peft_model_and_tokenizer = create_model_fixture(capabilities=ModelCapability.CAUSAL_LM, is_peft=True)
     random_peft_model_and_tokenizer = create_model_fixture(is_peft=True)
+
+# Unique model pairs of different/same architectures
+any_model_and_tokenizer_pairs = create_model_pairs_fixture()
+diff_model_and_tokenizer_pairs = create_model_pairs_fixture(allow_self_pairs=False)
