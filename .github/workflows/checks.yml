@@ -33,6 +33,7 @@ jobs:
         run: >
           poetry run pytest
           --cov=src/cycleformers
+          --cov=examples
           --cov-report=xml
           --cov-report=term-missing tests/
           tests/
