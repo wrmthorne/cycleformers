@@ -1,0 +1,33 @@
+### ONLY REQUIRED ARGUMENTS ###
+output_dir: "/tmp/profiler_outputs"
+###############################
+
+# === Training Arguments === #
+use_macct: true
+
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 16
+per_device_eval_batch_size: 1
+logging_strategy: steps
+logging_steps: 1
+report_to: "tensorboard"
+
+
+max_steps: 100
+
+
+# === Model Configs === #
+model_name_or_path: "Qwen/Qwen2.5-0.5B"
+
+
+# === LoRA Configs === #
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+task_type: "CAUSAL_LM"
+use_rslora: true
+
+
+# Optimisation
+# attn_implementation: "flash_attention_2"
+# use_liger_kernel: true

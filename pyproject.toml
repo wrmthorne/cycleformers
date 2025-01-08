@@ -11,7 +11,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.13"
-transformers = "^4.46.1"
+transformers = "4.46"
 torch = "^2.5.0"
 datasets = "^3.0.2"
 typing-extensions = {version = "^4.12.2", python = ">=3.8,<3.12"}
@@ -19,13 +19,26 @@ peft = "^0.13.2" # TODO: Add importutils is_peft_available methods and remove de
 
 [tool.poetry.group.dev.dependencies]
 bandit = "^1.8.0"
-pytest = "^8.3.3"
 pre-commit = "^4.0.1"
 ruff = "^0.7.1"
 mypy = "^1.13.0"
 semantic-release = "^0.1.0"
-pytest-cov = "^6.0.0"
 genbadge = {extras = ["build", "coverage"], version = "^1.1.1"}
+pytest = "^8.3.3"
+pytest-cov = "^6.0.0"
+pytest-benchmark = "^5.1.0"
+pytest-xdist = "^3.6.1"
+pytest-sugar = "^1.0.0"
+pytest-instafail = "^0.5.0"
+pytest-flakefinder = "^1.1.0"
+pytest-picked = "^0.5.1"
+pytest-random-order = "^1.1.1"
+
+[tool.poetry.group.profiling.dependencies]
+memory-profiler = "^0.61.0"
+snakeviz = "^2.2.2"
+torch-tb-profiler = "^0.4.3"
+tensorboard-plugin-profile = "^2.18.0"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
@@ -108,11 +121,13 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 markers = [
-    "slow: mark test as slow to run",
-    "requires_gpu: mark test as requiring a GPU or taking far too long to run on a CPU"
+    "slow: mark test as slow to run (run with --slow to enable)",
+    "meta: mark test as a test of the testing framework (run with --meta to enable)",
+    "requires_gpu: mark test as requiring a GPU or taking far too long to run on a CPU (skip with --no-gpu)"
 ]
 
 [tool.coverage.run]
+data_file = ".coverage"
 source = ["src/cycleformers"]
 omit = [
     "tests/*",

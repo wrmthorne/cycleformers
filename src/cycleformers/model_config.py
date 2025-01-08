@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from peft import get_peft_config
+from .utils import prefixed_view
 
 
 @dataclass
@@ -61,20 +61,90 @@ class ModelConfig:
     use_rslora: bool = False
     use_dora: bool = False
 
-    @property
-    def peft_config(self):
-        if not self.use_peft:
-            return None
+    def __post_init__(self):
+        self._A = None
+        self._B = None
 
-        return get_peft_config(
-            {
-                "peft_type": "LORA",
-                "task_type": self.lora_task_type,
-                "r": self.lora_r,
-                "lora_alpha": self.lora_alpha,
-                "lora_dropout": self.lora_dropout,
-                "target_modules": self.lora_target_modules,
-                "use_rslora": self.use_rslora,
-                "use_dora": self.use_dora,
-            }
-        )
+    @property
+    def A(self) -> "ModelConfig":
+        return self._A
+
+    @A.setter
+    def A(self, value: "ModelConfig"):
+        self._A = value
+
+    @property
+    def B(self) -> "ModelConfig":
+        return self._B
+
+    @B.setter
+    def B(self, value: "ModelConfig"):
+        self._B = value
+
+
+@dataclass
+@prefixed_view(ModelConfig, "A_")
+class ModelConfigA:
+    pass
+
+
+@dataclass
+@prefixed_view(ModelConfig, "B_")
+class ModelConfigB:
+    pass
+
+
+def merge_configs(base_config: ModelConfig, config_a: ModelConfigA, config_b: ModelConfigB) -> ModelConfig:
+    """Merge configs, with A/B specific values overriding base values, unless they're defaults.
+
+    Args:
+        base_config (ModelConfig): Base configuration with default values
+        config_a (ModelConfigA): Model A specific configuration that may override base values
+        config_b (ModelConfigB): Model B specific configuration that may override base values
+
+    Returns:
+        ModelConfig: The base config with A and B specific configs merged in
+
+    Example:
+        >>> base = ModelConfig(model_name="base", lora_r=32)
+        >>> a = ModelConfigA(A_model_name="model_a", A_lora_r=64)
+        >>> b = ModelConfigB(B_model_name="model_b")
+        >>> merged = merge_configs(base, a, b)
+        >>> merged.A.model_name
+        'model_a'
+        >>> merged.A.lora_r
+        64
+        >>> merged.B.model_name
+        'model_b'
+        >>> merged.B.lora_r
+        32
+    """
+    # Create copies to avoid modifying originals
+    merged_a = ModelConfig(**{k: getattr(base_config, k) for k in base_config.__dataclass_fields__})
+    merged_b = ModelConfig(**{k: getattr(base_config, k) for k in base_config.__dataclass_fields__})
+
+    # Create a default config to check against
+    default_config = ModelConfig()
+
+    # Override with A-specific values, but only if they're not defaults
+    for field in base_config.__dataclass_fields__:
+        if hasattr(config_a, field):
+            config_a_value = getattr(config_a, field)
+            # Only override if the A-specific value is different from default
+            if config_a_value != getattr(default_config, field):
+                setattr(merged_a, field, config_a_value)
+
+    # Override with B-specific values, but only if they're not defaults
+    for field in base_config.__dataclass_fields__:
+        if hasattr(config_b, field):
+            config_b_value = getattr(config_b, field)
+            # Only override if the B-specific value is different from default
+            if config_b_value != getattr(default_config, field):
+                setattr(merged_b, field, config_b_value)
+
+    base_config.A = merged_a
+    base_config.B = merged_b
+    return base_config
+
+
+__all__ = ["ModelConfig", "ModelConfigA", "ModelConfigB", "merge_configs"]

@@ -1,8 +1,7 @@
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
 
-from datasets import DatasetDict, load_dataset
+from datasets import DatasetDict
 
 from .base import BaseProcessor, ProcessorConfig
 
@@ -168,26 +167,19 @@ class CONLL2003Processor(BaseProcessor):
         self.config: CONLL2003ProcessorConfig = config  # type annotation for config
         self.sep_token = config.sep_token.strip()
 
-    def load(self) -> DatasetDict:
-        return load_dataset(
-            self.config.dataset_name,
-            trust_remote_code=True,  # FIXME: Don't allow by default or hardcode
-            cache_dir=self.config.cache_dir,
-        )
-
     def preprocess(self, dataset: DatasetDict) -> tuple[DatasetDict, DatasetDict]:
         original_cols = dataset["train"].column_names
-        dataset_A = dataset.map(
+        dataset = dataset.map(
             lambda x: {
                 "sentence": reconstruct_sentence(x["tokens"]),
                 "entity_seq": ner_to_sequences(x["tokens"], x["ner_tags"], self.sep_token),
             }
         ).remove_columns(original_cols)
 
-        dataset_B = deepcopy(dataset_A)
-        dataset_A = dataset_A.rename_columns({"sentence": "text", "entity_seq": "label"})
+        dataset_A = dataset.map(lambda x: {"text": x["sentence"], "label": x["entity_seq"]})
+        dataset_B = dataset.map(lambda x: {"text": x["entity_seq"], "label": x["sentence"]})
+
         dataset_A["train"] = dataset_A["train"].remove_columns(["label"])
-        dataset_B = dataset_B.rename_columns({"entity_seq": "text", "sentence": "label"})
         dataset_B["train"] = dataset_B["train"].remove_columns(["label"])
 
         return dataset_A, dataset_B

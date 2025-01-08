@@ -1,0 +1,12 @@
+# Causal Models
+tiny-llama-3.1:
+  repo_id: "trl-internal-testing/tiny-LlamaForCausalLM-3.1"
+
+qwen-2.5:
+  repo_id: "Qwen/Qwen2.5-0.5B"
+  description: "Needs to be replaced with a tiny model at some point"
+
+
+# Seq2Seq Models
+tiny-t5:
+  repo_id: "google/t5-efficient-tiny"

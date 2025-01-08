@@ -7,6 +7,14 @@ common functionality through the base class.
 
 from .base import BaseProcessor, ProcessorConfig
 from .ner import CONLL2003Processor, CONLL2003ProcessorConfig
+from .translation import TranslationProcessor, TranslationProcessorConfig
 
 
-__all__ = ["BaseProcessor", "CONLL2003Processor", "CONLL2003ProcessorConfig", "ProcessorConfig"]
+__all__ = [
+    "BaseProcessor",
+    "CONLL2003Processor",
+    "CONLL2003ProcessorConfig",
+    "ProcessorConfig",
+    "TranslationProcessor",
+    "TranslationProcessorConfig",
+]

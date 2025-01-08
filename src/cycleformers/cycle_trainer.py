@@ -2,17 +2,26 @@ import math
 import warnings
 from collections.abc import Callable
 from contextlib import contextmanager
+from os import PathLike
 from pathlib import Path
 from types import MethodType
+from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 import datasets
 import torch
 import torch.nn as nn
 from accelerate import Accelerator
-from peft import PeftConfig, PeftModel, get_peft_model
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import DataCollatorForSeq2Seq, DataCollatorWithPadding, PreTrainedTokenizerBase, Trainer
+from transformers import (
+    AutoTokenizer,
+    DataCollatorForSeq2Seq,
+    DataCollatorWithPadding,
+    PretrainedConfig,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+    Trainer,
+)
 from transformers.integrations import get_reporting_integration_callbacks
 from transformers.trainer import (
     DEFAULT_CALLBACKS,
@@ -30,9 +39,39 @@ from transformers.trainer_callback import (
 )
 from transformers.trainer_utils import TrainOutput
 
-from .cycle_training_arguments import CycleTrainingArguments
+from .cycle_trainer_utils import load_model
 from .cycles import PrepareCycleInputsNotSet, _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
+from .exceptions import CycleModelError, InvalidCycleKeyError, MACCTModelError, MissingModelError
+from .import_utils import is_liger_kernel_available, is_peft_available
 from .utils import DEFAULT_SEP_SEQ, auto_temp_attributes
+
+
+if TYPE_CHECKING:
+    from cycleformers import CycleTrainingArguments
+
+if is_peft_available():
+    from peft import LoraConfig, PeftConfig, PeftMixedModel, PeftModel, get_peft_model
+
+
+class PeftModelProtocol(Protocol):
+    """Protocol defining the required attributes and methods for PEFT models."""
+
+    active_adapter: str
+    base_model: PreTrainedModel
+    config: PretrainedConfig
+    generation_config: PretrainedConfig
+    peft_config: dict[str, "LoraConfig"]
+
+    def set_adapter(self, adapter_name: str) -> None: ...
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None: ...
+    def eval(self) -> None: ...
+    def train(self) -> None: ...
+    def generate(self, **kwargs) -> torch.Tensor: ...
+    def __call__(self, **kwargs) -> torch.Tensor: ...
+
+
+# Type variable for PEFT models, bound to our protocol
+PeftModelType = TypeVar("PeftModelType", bound=PeftModelProtocol)
 
 
 class CycleTrainer(Trainer):
@@ -136,9 +175,9 @@ class CycleTrainer(Trainer):
 
     def __init__(
         self,
-        args: CycleTrainingArguments,
-        models: nn.Module | dict[str, nn.Module] | None = None,
-        tokenizers: PreTrainedTokenizerBase | dict[str, PreTrainedTokenizerBase] | None = None,
+        args: "CycleTrainingArguments",
+        models: nn.Module | dict[str, nn.Module] | str | PathLike[str] | None = None,
+        tokenizers: PreTrainedTokenizerBase | dict[str, PreTrainedTokenizerBase] | str | PathLike[str] | None = None,
         train_dataset_A: datasets.Dataset | None = None,
         train_dataset_B: datasets.Dataset | None = None,
         eval_dataset_A: datasets.Dataset | None = None,
@@ -146,71 +185,150 @@ class CycleTrainer(Trainer):
         data_collator_A: DataCollatorWithPadding | DataCollatorForSeq2Seq | None = None,
         data_collator_B: DataCollatorWithPadding | DataCollatorForSeq2Seq | None = None,
         callbacks: list[TrainerCallback] | None = None,
-        peft_configs: PeftConfig | dict[str, PeftConfig] | None = None,
+        peft_configs: "PeftConfig | dict[str, PeftConfig] | None" = None,
     ):
         self.args = args
+        self.is_macct_model = self.args.use_macct
 
-        # Handle model initialization
-        if isinstance(models, dict):
-            if peft_configs is not None:
-                raise ValueError("When using peft_configs, models should be a single model, not a dictionary")
-            self.model_A = models["A"]
-            self.model_B = models["B"]
-            self.is_peft_model = False
-        elif isinstance(models, PeftModel):
-            adapter_names = list(models.peft_config)
-            if "A" in adapter_names and "B" in adapter_names:
-                self.model_A = self.model_B = models
-                self.is_peft_model = True
-            else:
-                raise ValueError(f"Missing at least one adapter. Expecting 'A' and 'B' but got {adapter_names}")
-        elif not isinstance(models, nn.Module):
-            raise ValueError("models must be a nn.Module or dict[str, nn.Module] with keys 'A' and 'B'")
-        elif peft_configs is not None:
+        # Models is None or empty dict
+        if models is None or not models:
+            raise MissingModelError("CycleTrainer didn't receive any models or paths to train.")
+
+        # Validate peft_configs and convert to dict for easier handling
+        if is_peft_available() and peft_configs is not None:
+            # Single config for both models
             if isinstance(peft_configs, PeftConfig):
-                # Single config - create two identical adapters
-                if hasattr(peft_configs, "adapter_name") and peft_configs.adapter_name is not None:
-                    warnings.warn("adapter_name in peft_config will be ignored. Using 'A' and 'B' as adapter names")
-
-                # Create model with first adapter
-                self.model_A = self.model_B = get_peft_model(models, peft_configs, adapter_name="A")
-                self.model_A.add_adapter("B", peft_configs)
-                self.is_peft_model = True
-
+                peft_configs = {"A": peft_configs, "B": peft_configs}
+            # Allow A or B but must have at least one
             elif isinstance(peft_configs, dict):
-                # Dictionary of configs
-                if not {"A", "B"}.issubset(peft_configs.keys()):
-                    raise ValueError(
-                        f"peft_configs dictionary must contain at least keys 'A' and 'B'. Got {list(peft_configs)}"
-                    )
-
-                # Check for different task types
-                task_types = {name: config.task_type for name, config in peft_configs.items()}
-                if len(set(task_types.values())) > 1:
-                    warnings.warn(
-                        f"Different task types detected in peft_configs: {task_types}. "
-                        "This may lead to unexpected behavior."
-                    )
-
-                # Create model with first adapter
-                self.model_A = self.model_B = get_peft_model(models, peft_configs["A"], adapter_name="A")
-                # Add remaining adapters
-                for name, config in peft_configs.items():
-                    if name != "A":
-                        self.model_A.add_adapter(name, config)
-                self.is_peft_model = True
-            else:
+                if not any(key in peft_configs.keys() for key in ["A", "B"]):
+                    raise InvalidCycleKeyError("peft_configs dict must contain at least one of the keys 'A' or 'B'")
+            elif not isinstance(peft_configs, (PeftConfig, dict)):
                 raise ValueError(
                     f"peft_configs must be a PeftConfig or dict[str, PeftConfig], got {type(peft_configs)}"
                 )
-        else:
-            # TODO: Should this be allowed?
-            self.model_A = self.model_B = models
-            self.is_peft_model = False
 
-        # Store adapter names for convenience
-        self.adapter_A = "A" if self.is_peft_model else None
-        self.adapter_B = "B" if self.is_peft_model else None
+        # TODO: Should strings only be able to create MACCT, only multi-model or both?
+        # TODO: Be consistent across all single model cases
+        if isinstance(models, (str, PathLike)):
+            # Load model from path
+            model_name = models
+            model_A = load_model(model_name, **self.args.model_init_kwargs)
+
+            if not self.is_macct_model:
+                # Create a duplicate model for non-MACCT mode
+                model_B = load_model(model_name, **self.args.model_init_kwargs)
+                models = {"A": model_A, "B": model_B}
+            else:
+                models = model_A
+
+        # === Single Models === #
+        if isinstance(models, nn.Module):
+            if not self.is_macct_model:
+                raise MissingModelError()
+
+            if not is_peft_available():
+                raise MACCTModelError(
+                    "PEFT is not available. Multi-adapter training cannot be performed without "
+                    "PEFT. Please install it with `pip install peft`"
+                )
+
+            # No way to create adapters without a PeftConfig
+            if not isinstance(models, (PeftModel, PeftMixedModel)):
+                if peft_configs is None or not all(key in peft_configs for key in ["A", "B"]):
+                    raise MACCTModelError(
+                        "MACCT mode requires PEFT adapters. Please provide peft_configs or a PeftModel "
+                        "with adapters 'A' and 'B'."
+                    )
+                models = get_peft_model(models, peft_configs["A"], adapter_name="A")
+                models.add_adapter("B", peft_configs["B"])
+            else:
+                # Check for required adapters
+                missing_adapters = {"A", "B"} - set(models.peft_config)
+                if missing_adapters:
+                    if peft_configs is None:
+                        raise MACCTModelError(
+                            f"PeftModel is missing adapter(s) {missing_adapters} and no PeftConfig was provided. "
+                            "Please provide peft_configs or add the missing adapters."
+                        )
+                    # Add missing adapters from configs
+                    for adapter in missing_adapters:
+                        if adapter not in peft_configs:
+                            raise MACCTModelError(
+                                f"Missing config for adapter {adapter} in peft_configs. Please provide "
+                                "configs for all missing adapters."
+                            )
+                        models.add_adapter(adapter, peft_configs[adapter])
+                        warnings.warn(
+                            f"Adding adapter {adapter} from peft_configs. This is not expected if you are "
+                            "loading pre-trained adapters `A` and `B`."
+                        )
+
+            # TODO: Replace with single model management object (e.g. ModelManager or PeftModel)
+            # Use same model for both A and B in MACCT mode
+            if not isinstance(models, (PeftModel, PeftMixedModel)):
+                raise MACCTModelError("Model must be a PeftModel or PeftMixedModel in MACCT mode")
+            self.model_A = self.model_B = models
+
+        # Handle dictionary of models
+        elif isinstance(models, dict):
+            if self.is_macct_model:
+                raise MACCTModelError("Cannot use dictionary of models in MACCT mode. Please provide a single model.")
+            if not models.keys() == {"A", "B"}:
+                raise InvalidCycleKeyError(
+                    f"models dict must contain exact keys 'A' and 'B'. Got {list(models.keys())}"
+                )
+
+            if is_peft_available() and peft_configs is not None:
+                # Apply PEFT configs to models if they are supplied and not already present
+                for key in ["A", "B"]:
+                    if not isinstance(models[key], PeftModel) or models[key].peft_config.get(key) is None:
+                        if isinstance(peft_configs, dict):
+                            peft_config_key = peft_configs.get(key, None)
+                        else:
+                            peft_config_key = peft_configs
+
+                        if peft_config_key is not None:
+                            models[key] = get_peft_model(models[key], peft_config_key, adapter_name=key)
+
+            self.model_A = cast(PeftModel | PeftMixedModel, models["A"])
+            self.model_B = cast(PeftModel | PeftMixedModel, models["B"])
+
+        else:
+            raise CycleModelError(
+                f"Invalid models type: {type(models)}. Must be one of: PreTrainedModel, PeftModel, "
+                "dict[str, nn.Module], or path to model."
+            )
+
+        self.adapter_A = "A" if self.is_macct_model else None
+        self.adapter_B = "B" if self.is_macct_model else None
+
+        if self.args.use_liger_kernel:
+            if is_liger_kernel_available():
+                from liger_kernel.transformers import _apply_liger_kernel_to_instance  # type: ignore
+
+                for model in [self.model_A] + [self.model_B] if not self.is_macct_model else []:
+                    if isinstance(model, PreTrainedModel):
+                        # Patch the model with liger kernels. Use the default kernel configurations.
+                        _apply_liger_kernel_to_instance(model=model)
+                    elif hasattr(model, "base_model") and isinstance(model.base_model.model, PreTrainedModel):
+                        # Patch the base model with liger kernels. Use the default kernel configurations.
+                        _apply_liger_kernel_to_instance(model=model.base_model.model)
+                    else:
+                        warnings.warn(
+                            "The model is not an instance of PreTrainedModel. No liger kernels will be applied."
+                        )
+            else:
+                raise ImportError(
+                    "You have set use_liger_kernel to True but liger-kernel >= 0.3.0 is not available. "
+                    "Please install it with pip install liger-kernel"
+                )
+
+        # Create distinct tokenizers if not provided
+        if tokenizers is None:
+            tokenizer_A = AutoTokenizer.from_pretrained(self._get_config(self.model_A).name_or_path)
+            tokenizer_B = AutoTokenizer.from_pretrained(self._get_config(self.model_B).name_or_path)
+            tokenizers = {"A": tokenizer_A, "B": tokenizer_B}
 
         # Extract tokenizers from input
         if isinstance(tokenizers, dict):
@@ -219,6 +337,7 @@ class CycleTrainer(Trainer):
 
             if tokenizers["A"] == tokenizers["B"]:
                 tokenizer_A = tokenizer_B = tokenizers["A"]  # TODO: Find equality function for tokenizers
+
             else:
                 tokenizer_A = tokenizers["A"]
                 tokenizer_B = tokenizers["B"]
@@ -234,20 +353,24 @@ class CycleTrainer(Trainer):
                 model.generation_config.pad_token_id = tokenizer.eos_token_id
             # Set the default padding side to left so it is correct for _prepare_dataset and data collators
             # Call padding_side in tokenizer when we create final synth batches
-            tokenizer.padding_side = "left" if not model.config.is_encoder_decoder else tokenizer.padding_side
+            tokenizer.padding_side = (
+                "left" if not self._get_config(model).is_encoder_decoder else tokenizer.padding_side
+            )
 
         self.tokenizer_A = tokenizer_A
         self.tokenizer_B = tokenizer_B
 
-        if data_collator_A is None and self.model_A.config.is_encoder_decoder:
-            self.data_collator_A = DataCollatorForSeq2Seq(tokenizer_A)
-        elif data_collator_A is None:
-            self.data_collator_A = DataCollatorWithPadding(tokenizer_A)
+        if data_collator_A is None:
+            if self._get_config(self.model_A).is_encoder_decoder:
+                self.data_collator_A = DataCollatorForSeq2Seq(tokenizer_A)
+            else:
+                self.data_collator_A = DataCollatorWithPadding(tokenizer_A)
 
-        if data_collator_B is None and self.model_B.config.is_encoder_decoder:
-            self.data_collator_B = DataCollatorForSeq2Seq(tokenizer_B)
-        elif data_collator_B is None:
-            self.data_collator_B = DataCollatorWithPadding(tokenizer_B)
+        if data_collator_B is None:
+            if self._get_config(self.model_B).is_encoder_decoder:
+                self.data_collator_B = DataCollatorForSeq2Seq(tokenizer_B)
+            else:
+                self.data_collator_B = DataCollatorWithPadding(tokenizer_B)
 
         # TODO: Expose through config
         self.sep_seq = DEFAULT_SEP_SEQ
@@ -267,7 +390,7 @@ class CycleTrainer(Trainer):
                     text_column="text",
                     max_seq_length=None,
                     remove_unused_columns=True,
-                    is_encoder_decoder=model.config.is_encoder_decoder,
+                    is_encoder_decoder=self._get_config(model).is_encoder_decoder,
                     formatting_func=None,
                     add_special_tokens=True,
                     skip_prepare_dataset=False,
@@ -275,14 +398,12 @@ class CycleTrainer(Trainer):
                 # Only hack I could find to not have lots of repeat code
                 setattr(self, attr_name, dataset)
 
-        ## Calculate batches
+        # Calculate batches
         if not args.max_steps > 0:
-            # Calculate number of samples per epoch
             if train_dataset_A is None or train_dataset_B is None:
                 raise ValueError("Both train_dataset_A and train_dataset_B must be provided")
 
             num_samples_per_epoch = min(len(train_dataset_A), len(train_dataset_B))
-            # Calculate number of steps considering batch size and gradient accumulation
             num_update_steps_per_epoch = num_samples_per_epoch // (
                 args.per_device_train_batch_size * args.gradient_accumulation_steps
             )
@@ -294,12 +415,12 @@ class CycleTrainer(Trainer):
 
         ## Setup model and dataloaders
         # TODO: Investigate just preparing lora_layers https://github.com/huggingface/diffusers/issues/4046
-        if self.is_peft_model:
+        if self.is_macct_model and self.adapter_A is not None:
             # For PEFT models, we need to set the active adapter before creating optimizers
             self.model_A.set_adapter(self.adapter_A)
         self.optimizer_A, self.lr_scheduler_A = self.create_optimizer_and_scheduler(self.model_A, args.max_steps)
 
-        if self.is_peft_model:
+        if self.is_macct_model and self.adapter_B is not None:
             self.model_B.set_adapter(self.adapter_B)
         self.optimizer_B, self.lr_scheduler_B = self.create_optimizer_and_scheduler(self.model_B, args.max_steps)
 
@@ -332,6 +453,11 @@ class CycleTrainer(Trainer):
         )
 
         self.set_cycle_inputs_fn()
+
+    def _get_config(self, model: "PreTrainedModel | PeftModel | PeftMixedModel") -> PretrainedConfig:
+        if isinstance(model, (PeftModel, PeftMixedModel)):
+            return model.base_model.config
+        return model.config
 
     def _prepare_dataset(
         self,
@@ -505,7 +631,7 @@ class CycleTrainer(Trainer):
         run_dir = self._get_output_dir(trial=trial)
         output_dir = Path(run_dir) / checkpoint_folder
 
-        if self.is_peft_model:
+        if self.is_macct_model:
             self.save_model(output_dir, self.model_A, _internal_call=True)
         else:
             self.save_model(output_dir / "A", self.model_A, _internal_call=True)
@@ -683,23 +809,28 @@ class CycleTrainer(Trainer):
         return TrainOutput(self.state.global_step, 0.0, {})
 
     @contextmanager
-    def switch_adapter(self, model: nn.Module, adapter_name: str | None = None):
+    def switch_adapter(self, model: "PeftModel | PeftMixedModel | nn.Module", adapter_name: str | None = None):
         """Context manager to safely switch adapters and handle cleanup"""
-        if not self.is_peft_model or adapter_name is None:
+        if not self.is_macct_model or adapter_name is None or not isinstance(model, (PeftModel, PeftMixedModel)):
             yield
             return
 
         previous_adapter = model.active_adapter
         try:
-            model.set_adapter(adapter_name)
+            # We know adapter_name is str here because we checked for None above
+            adapter_str: str = adapter_name
+            if isinstance(model, PeftModel):
+                model.set_adapter(adapter_str)
+            elif isinstance(model, PeftMixedModel):
+                model.set_adapter(adapter_str)  # PeftMixedModel accepts str or list[str]
             yield
         finally:
             model.set_adapter(previous_adapter)
 
     def _cycle_step(
         self,
-        model_train: nn.Module,
-        model_gen: nn.Module,
+        model_train: "PeftModel | PeftMixedModel | nn.Module",
+        model_gen: "PeftModel | PeftMixedModel | nn.Module",
         tokenizer_train: PreTrainedTokenizerBase,
         tokenizer_gen: PreTrainedTokenizerBase,
         optimizer: torch.optim.Optimizer,
@@ -750,6 +881,12 @@ class CycleTrainer(Trainer):
         model_train.train()
         metrics = {}
 
+        TEMP_GEN_ARGS = {
+            "max_new_tokens": 30,
+            "use_cache": True,
+            "do_sample": False,  # Significant speedup
+        }
+
         # Handle adapter switching for generation
         gen_adapter = self.adapter_B if cycle_name == "A" else self.adapter_A
         train_adapter = self.adapter_A if cycle_name == "A" else self.adapter_B
@@ -757,7 +894,10 @@ class CycleTrainer(Trainer):
         with self.switch_adapter(model_gen, gen_adapter):
             with torch.inference_mode():
                 synth_batch_ids = model_gen.generate(
-                    input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], max_new_tokens=100
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch["attention_mask"],
+                    **TEMP_GEN_ARGS,
+                    pad_token_id=tokenizer_gen.eos_token_id if tokenizer_gen.eos_token_id else None,
                 )
 
         # Prepare inputs using generated text
@@ -821,8 +961,8 @@ class CycleTrainer(Trainer):
             # Both causal models that share a tokenizer from a tested model family
             elif (
                 self.tokenizer_A == self.tokenizer_B
-                and not self.model_A.config.is_encoder_decoder
-                and not self.model_B.config.is_encoder_decoder
+                and not self._get_config(self.model_A).is_encoder_decoder
+                and not self._get_config(self.model_B).is_encoder_decoder
             ):
                 bound_method = MethodType(_prepare_causal_skip_cycle_inputs, self)
             else:
