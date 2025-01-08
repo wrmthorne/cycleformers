@@ -47,12 +47,10 @@ from .utils import DEFAULT_SEP_SEQ, auto_temp_attributes
 
 
 if TYPE_CHECKING:
-    from peft import LoraConfig, PeftConfig, PeftMixedModel, PeftModel
-
     from cycleformers import CycleTrainingArguments
 
 if is_peft_available():
-    from peft import PeftConfig, PeftModel, get_peft_model
+    from peft import LoraConfig, PeftConfig, PeftMixedModel, PeftModel, get_peft_model
 
 
 class PeftModelProtocol(Protocol):
@@ -216,12 +214,13 @@ class CycleTrainer(Trainer):
             # Load model from path
             model_name = models
             model_A = load_model(model_name, **self.args.model_init_kwargs)
-            models = {"A": model_A}
 
             if not self.is_macct_model:
                 # Create a duplicate model for non-MACCT mode
                 model_B = load_model(model_name, **self.args.model_init_kwargs)
-                models["B"] = model_B
+                models = {"A": model_A, "B": model_B}
+            else:
+                models = model_A
 
         # === Single Models === #
         if isinstance(models, nn.Module):
@@ -455,7 +454,7 @@ class CycleTrainer(Trainer):
 
         self.set_cycle_inputs_fn()
 
-    def _get_config(self, model: PreTrainedModel | PeftModel | PeftMixedModel) -> PretrainedConfig:
+    def _get_config(self, model: "PreTrainedModel | PeftModel | PeftMixedModel") -> PretrainedConfig:
         if isinstance(model, (PeftModel, PeftMixedModel)):
             return model.base_model.config
         return model.config
@@ -810,7 +809,7 @@ class CycleTrainer(Trainer):
         return TrainOutput(self.state.global_step, 0.0, {})
 
     @contextmanager
-    def switch_adapter(self, model: PeftModel | PeftMixedModel | nn.Module, adapter_name: str | None = None):
+    def switch_adapter(self, model: "PeftModel | PeftMixedModel | nn.Module", adapter_name: str | None = None):
         """Context manager to safely switch adapters and handle cleanup"""
         if not self.is_macct_model or adapter_name is None or not isinstance(model, (PeftModel, PeftMixedModel)):
             yield
@@ -830,8 +829,8 @@ class CycleTrainer(Trainer):
 
     def _cycle_step(
         self,
-        model_train: PeftModel | PeftMixedModel | nn.Module,
-        model_gen: PeftModel | PeftMixedModel | nn.Module,
+        model_train: "PeftModel | PeftMixedModel | nn.Module",
+        model_gen: "PeftModel | PeftMixedModel | nn.Module",
         tokenizer_train: PreTrainedTokenizerBase,
         tokenizer_gen: PreTrainedTokenizerBase,
         optimizer: torch.optim.Optimizer,
