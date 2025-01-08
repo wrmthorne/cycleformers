@@ -39,12 +39,14 @@ jobs:
           --all
           --instafail
           -n auto
+          --junitxml=junit.xml
           # --cov-fail-under=80
       
       - name: Generate coverage badge
         run: |
           mkdir -p .github/badges
           poetry run genbadge coverage -i coverage.xml -o .github/badges/coverage.svg
+          poetry run genbadge tests -i junit.xml -o .github/badges/build.svg
       
       - name: Commit badge
         if: github.event_name == 'pull_request'
@@ -53,7 +55,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           # Fetch and checkout the PR branch
           git fetch origin ${{ github.head_ref }}
-          git checkout ${{ github.head_ref }}
-          git add .github/badges/coverage.svg
-          git commit -m "Update coverage badge" || exit 0
+          git checkout -f ${{ github.head_ref }}
+          git add .github/badges/coverage.svg .github/badges/build.svg
+          git commit -m "Update build and coverage badges" || exit 0
           git push origin ${{ github.head_ref }}
