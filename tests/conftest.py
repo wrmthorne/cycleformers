@@ -19,8 +19,7 @@ from transformers import (
 )
 
 from cycleformers.import_utils import is_peft_available
-
-from .testing_utils.model_registry import (
+from tests.testing_utils.model_registry import (
     CapabilityExpression,
     ModelCapability,
     ModelRegistry,
