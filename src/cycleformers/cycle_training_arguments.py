@@ -13,8 +13,8 @@ class CycleTrainingArguments(TrainingArguments):
     """Will eventually contain cycle-specific arguments"""
 
     use_macct: bool = False
-    report_to: list[str] = field(default_factory=lambda: ["wandb"])
-    sep_seq: str = field(default="")
+    report_to: list[str] | None = None
+    sep_seq: str = field(default="")  # Separator sequence
     model_init_kwargs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
