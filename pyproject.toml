@@ -16,7 +16,6 @@ torch = "^2.5.0"
 datasets = "^3.0.2"
 typing-extensions = {version = "^4.12.2", python = ">=3.8,<3.12"}
 peft = "^0.13.2" # TODO: Add importutils is_peft_available methods and remove dependency
-wandb = "^0.19.1"
 
 [tool.poetry.group.dev.dependencies]
 bandit = "^1.8.0"
@@ -128,6 +127,7 @@ markers = [
 ]
 
 [tool.coverage.run]
+data_file = ".coverage"
 source = ["src/cycleformers"]
 omit = [
     "tests/*",

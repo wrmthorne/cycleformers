@@ -120,7 +120,6 @@ def create_model_fixture(
             pytest.skip("Need --slow or --all option to run")
 
         models = model_registry.get_matching_models(capabilities, model_names)
-
         if not models:
             pytest.skip(f"No models found with capabilities={capabilities} and names={model_names}")
 
@@ -128,19 +127,30 @@ def create_model_fixture(
         if not request.config.getoption("--all"):
             models = [random.choice(models)]
 
-        for model_spec in models:
-            model, tokenizer = load_model_and_tokenizer(model_spec)
+        # Get the specific model based on param if it exists
+        model_idx = getattr(request, "param", 0) or 0
+        model_spec = models[model_idx]
 
-            if is_peft:
-                if not is_peft_available():
-                    pytest.skip("PEFT is not installed")
+        model, tokenizer = load_model_and_tokenizer(model_spec)
 
-                config = peft_config or LoraConfig(r=8, lora_alpha=16)
-                config.task_type = "CAUSAL_LM" if isinstance(model, AutoModelForCausalLM) else "SEQ_2_SEQ_LM"
-                model = get_peft_model(model, config, adapter_name="A")
-                model.add_adapter("B", config)  # Doesn't matter if models have too many adapters on
+        if is_peft:
+            if not is_peft_available():
+                pytest.skip("PEFT is not installed")
+            config = peft_config or LoraConfig(r=8, lora_alpha=16)
+            config.task_type = "CAUSAL_LM" if isinstance(model, AutoModelForCausalLM) else "SEQ_2_SEQ_LM"
+            model = get_peft_model(model, config, adapter_name="A")
+            model.add_adapter("B", config)
 
-            yield model, tokenizer
+        yield model, tokenizer
+
+    # Instead of setting params directly, we'll use metafunc parameterization
+    def pytest_generate_tests(metafunc):
+        if "model_fixture" in metafunc.fixturenames:
+            registry = ModelRegistry()  # You'll need to adjust this based on how your registry is created
+            models = registry.get_matching_models(capabilities, model_names)
+            if not metafunc.config.getoption("--all"):
+                models = [random.choice(models)]
+            metafunc.parametrize("model_fixture", range(len(models)), indirect=True)
 
     return model_fixture
 
@@ -180,8 +190,33 @@ def create_model_pairs_fixture(
         if not request.config.getoption("--all"):
             model_pairs = [random.choice(model_pairs)]
 
-        for model_A, model_B in model_pairs:
-            yield load_model_and_tokenizer(model_A), load_model_and_tokenizer(model_B)
+        # Get specific pair based on param if it exists
+        pair_idx = getattr(request, "param", 0) or 0
+        model_A, model_B = model_pairs[pair_idx]
+
+        yield load_model_and_tokenizer(model_A), load_model_and_tokenizer(model_B)
+
+    def pytest_generate_tests(metafunc):
+        if "model_pairs" in metafunc.fixturenames:
+            # Generate the pairs list to determine parameterization
+            registry = ModelRegistry()  # Adjust based on your registry creation
+            models = []
+            for capability in capabilities:
+                valid_models = registry.get_matching_models(capability)
+                if valid_models:
+                    models.append(random.choice(valid_models))
+
+            if identical_only:
+                pairs = [(model, model) for model in models]
+            elif allow_self_pairs:
+                pairs = list(combinations_with_replacement(models, 2))
+            else:
+                pairs = list(combinations(models, 2))
+
+            if not metafunc.config.getoption("--all", False):
+                pairs = [random.choice(pairs)]
+
+            metafunc.parametrize("model_pairs", range(len(pairs)), indirect=True)
 
     return model_pairs
 

@@ -54,7 +54,7 @@ test:
 	poetry run pytest $(TEST_DIR)
 
 test-all:
-	poetry run pytest $(TEST_DIR) -v --slow --meta -n auto
+	poetry run pytest $(TEST_DIR) -v --slow --meta -n auto --instafail
 
 build-docs:
 	poetry run mkdocs build

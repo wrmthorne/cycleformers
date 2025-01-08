@@ -37,6 +37,8 @@ jobs:
           --cov-report=term-missing tests/
           tests/
           --all
+          --instafail
+          -n auto
           # --cov-fail-under=80
       
       - name: Generate coverage badge
