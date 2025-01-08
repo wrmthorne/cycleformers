@@ -201,5 +201,5 @@ if is_peft_available():
 
 # Unique model pairs of different/same architectures
 any_model_and_tokenizer_pairs = create_model_pairs_fixture()
-same_model_and_tokenizer_pairs = create_model_pairs_fixture(allow_self_pairs=True)
+same_model_and_tokenizer_pairs = create_model_pairs_fixture(identical_only=True)
 diff_model_and_tokenizer_pairs = create_model_pairs_fixture(allow_self_pairs=False)
