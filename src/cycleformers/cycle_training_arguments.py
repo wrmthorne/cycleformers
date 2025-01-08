@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from transformers.training_args import TrainingArguments
 
@@ -15,6 +15,7 @@ class CycleTrainingArguments(TrainingArguments):
     use_macct: bool = False
     report_to: list[str] = field(default_factory=lambda: ["wandb"])
     sep_seq: str = field(default="")
+    model_init_kwargs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         super().__post_init__()

@@ -24,7 +24,6 @@ lora_config = {
     "use_peft": True,
     "lora_r": 8,
     "lora_alpha": 16,
-    "lora_target_modules": "all-linear",
 }
 
 causal_yaml = {
