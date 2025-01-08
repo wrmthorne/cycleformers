@@ -1,0 +1,2 @@
+excludes:
+  - regex: .*sentry.*
