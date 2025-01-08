@@ -1,2 +1,3 @@
-excludes:
-  - regex: .*sentry.*
+detectors:
+  SentryToken:
+    disabled: true
