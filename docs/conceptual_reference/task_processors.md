@@ -32,6 +32,12 @@ More information on the syntax for `slice split` can be found in the [datasets d
 ::: src.cycleformers.task_processors.ner.CONLL2003ProcessorConfig
 
 
+## Translation (e.g. WMT)
+
+::: src.cycleformers.task_processors.translation.TranslationProcessor
+
+::: src.cycleformers.task_processors.translation.TranslationProcessorConfig
+
 
 ### Helper Functions
 

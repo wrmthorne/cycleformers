@@ -37,4 +37,29 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 ```
 
-🚧 # TODO: Test whether you can compile, use optimum, etc. on base model when using MACCT.
+### 2.3 Optimising Inference of Base Model
+
+🚧 A LOT OF THIS SECTION IS MY SPECULATION AND ANEDOTAL EXPERIENCE. I INTEND TO EMPIRICALY EXPLORE THESE QUESTIONS 🚧
+
+As we are only training the adapters, we can apply some of the same optimisations made for inference only models. The only consideration is that it must still be interoperable with the adapters e.g. not impede the flow of gradients where they would otherwise be used.
+
+We can exploit `torch.compile` to compile the base model but only some compilation backends are compatible and some algorithms incur a higher upfront penalty for faster throughput there after. 
+
+The two backends to try are `inductor` and `aot_eager` as they are compatible, conceptually simpler and better optimised for modern hardware.For MACCT, we only have 4 possible states (adapter_A only, adapter_B only, both, or neither) so we can use `fullgraph=True` to compile the model. PyTorch do a great job of explaining how and when to use each backend [here](https://pytorch.org/docs/stable/torch.compiler_faq.html).
+
+```python
+from torch._dynamo import compile
+from peft import PeftModel
+
+# With adapters A and B attached to the base model
+model: PeftModel = ...
+
+# Compile with inductor since we only have 4 possible states
+# (adapter_A only, adapter_B only, both, or neither)
+optimized_model = torch.compile(
+    model,
+    backend="inductor",
+    fullgraph=True  # Since patterns are limited
+)
+```
+
