@@ -143,7 +143,6 @@ def create_model_fixture(
 
         yield model, tokenizer
 
-    # Instead of setting params directly, we'll use metafunc parameterization
     def pytest_generate_tests(metafunc):
         if "model_fixture" in metafunc.fixturenames:
             registry = ModelRegistry()  # You'll need to adjust this based on how your registry is created

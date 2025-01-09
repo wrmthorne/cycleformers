@@ -37,9 +37,9 @@ from transformers.trainer_callback import (
     TrainerControl,
     TrainerState,
 )
-from transformers.trainer_utils import TrainOutput
+from transformers.trainer_utils import TrainerMemoryTracker, TrainOutput
 
-from .cycle_trainer_utils import load_model
+from .cycle_trainer_utils import PreTrainingSummary, load_model
 from .cycles import PrepareCycleInputsNotSet, _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
 from .exceptions import CycleModelError, InvalidCycleKeyError, MACCTModelError, MissingModelError
 from .import_utils import is_liger_kernel_available, is_peft_available
@@ -189,6 +189,9 @@ class CycleTrainer(Trainer):
     ):
         self.args = args
         self.is_macct_model = self.args.use_macct
+
+        self._memory_tracker = TrainerMemoryTracker(self.args.skip_memory_metrics)
+        self._memory_tracker.start()
 
         # Models is None or empty dict
         if models is None or not models:
@@ -453,6 +456,7 @@ class CycleTrainer(Trainer):
         )
 
         self.set_cycle_inputs_fn()
+        self._memory_tracker.stop_and_update_metrics()
 
     def _get_config(self, model: "PreTrainedModel | PeftModel | PeftMixedModel") -> PretrainedConfig:
         if isinstance(model, (PeftModel, PeftMixedModel)):
@@ -695,6 +699,9 @@ class CycleTrainer(Trainer):
             >>> trainer.train()
             TrainOutput(global_step=1000, training_loss=2.4, metrics={})
         """
+        # Must start as early as possible
+        self._memory_tracker.start()
+
         args = self.args
         optimizer_A = self.optimizer_A
         optimizer_B = self.optimizer_B
@@ -736,6 +743,13 @@ class CycleTrainer(Trainer):
         if args.eval_on_start:
             self.evaluate()
 
+        # TODO: Tidy this up
+        PreTrainingSummary(
+            {"A": self.model_A, "B": self.model_B},
+            {self._get_model_config(self.model_A): self.model_A, self._get_model_config(self.model_B): self.model_B},
+            {"A_train": self.train_dataset_A, "B_train": self.train_dataset_B},
+            self.is_macct_model,
+        )
         for epoch in range(epochs_trained, num_train_epochs):
             for idx, (batch_A, batch_B) in enumerate(zip(self.train_dataloader_A, self.train_dataloader_B)):
                 # Check if training should stop
@@ -805,6 +819,8 @@ class CycleTrainer(Trainer):
 
         # End of training
         self.control = self.callback_handler.on_train_end(args, self.state, self.control)
+        self._memory_tracker.stop_and_update_metrics(metrics)
+        self.log(metrics)
 
         return TrainOutput(self.state.global_step, 0.0, {})
 
@@ -1018,6 +1034,9 @@ class CycleTrainer(Trainer):
             >>> print(metrics)
             {'eval_loss_A': 2.1}
         """
+        # Must start as early as possible
+        self._memory_tracker.start()
+
         metrics = {}
 
         # Evaluate model A
@@ -1049,5 +1068,5 @@ class CycleTrainer(Trainer):
                 losses_B.append(loss.detach().cpu())
 
         metrics["eval_loss_B"] = torch.mean(torch.tensor(losses_B))
-
+        self._memory_tracker.stop_and_update_metrics(metrics)
         return metrics

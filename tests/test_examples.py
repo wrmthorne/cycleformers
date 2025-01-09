@@ -1,5 +1,4 @@
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -66,7 +65,7 @@ seq2seq_yaml_macct = {**lora_config, "lora_task_type": "SEQ_2_SEQ_LM"} | seq2seq
         ("seq2seq-macct", "seq2seq-macct.yaml", seq2seq_yaml_macct),
     ],
 )
-def test_cycle_ner(example_script, dataset_name, config_yaml, temp_dir):
+def test_examples(example_script, dataset_name, config_yaml, temp_dir):
     out_dirname, filename, config = config_yaml
     out_dir = Path(temp_dir) / out_dirname
 

@@ -10,7 +10,7 @@ PROJECT_VERSION ?= v$(shell poetry version -s)
 PYTHON_VERSION ?= 3.11
 .DEFAULT_GOAL := all
 
-.PHONY: init-env init check-toml lint-src format lint quality audit test test-all all clean info build-docs
+.PHONY: init-env init benchmark check-toml lint-src format lint quality audit test test-all all clean info build-docs
 
 init-env:
 	@if [ ! -f .env ]; then \
@@ -49,6 +49,9 @@ quality:
 
 audit:
 	poetry run bandit -r $(SOURCE_DIR) -x $(TEST_DIR)
+
+benchmark:
+	@echo "Not implemented yet"
 
 test:
 	poetry run pytest $(TEST_DIR)
