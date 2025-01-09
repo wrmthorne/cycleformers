@@ -17,6 +17,7 @@ yaml_base = {
     "save_steps": 1,
     "logging_strategy": "steps",
     "logging_steps": 1,
+    "report_to": "none",
 }
 
 lora_config = {
