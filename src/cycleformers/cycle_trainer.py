@@ -746,7 +746,7 @@ class CycleTrainer(Trainer):
         # TODO: Tidy this up
         PreTrainingSummary(
             {"A": self.model_A, "B": self.model_B},
-            {self._get_model_config(self.model_A): self.model_A, self._get_model_config(self.model_B): self.model_B},
+            {"A": self._get_config(self.model_A), "B": self._get_config(self.model_B)},
             {"A_train": self.train_dataset_A, "B_train": self.train_dataset_B},
             self.is_macct_model,
         )
