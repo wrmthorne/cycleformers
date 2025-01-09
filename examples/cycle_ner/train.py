@@ -50,9 +50,6 @@ def get_model_and_tokenizer(model_config, training_args):
     if training_args.gradient_checkpointing:
         model.enable_input_require_grads()
 
-    # Print the actual dtype of the first parameter
-    print(f"Model weights dtype: {next(model.parameters()).dtype}")
-
     tokenizer = AutoTokenizer.from_pretrained(model_config.model_name_or_path, use_fast=True)
     return model, tokenizer
 
@@ -87,8 +84,8 @@ def main():
         tokenizers=tokenizers,
         train_dataset_A=dataset_A["train"],
         train_dataset_B=dataset_B["train"],
-        eval_dataset_A=dataset_A["eval"] if not args.eval_strategy == "no" else None,
-        eval_dataset_B=dataset_B["eval"] if not args.eval_strategy == "no" else None,
+        eval_dataset_A=dataset_A["test"] if not args.eval_strategy == "no" else None,
+        eval_dataset_B=dataset_B["test"] if not args.eval_strategy == "no" else None,
         peft_configs=get_peft_config(model_config_base),
     )
 

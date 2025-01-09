@@ -39,12 +39,18 @@ memory-profiler = "^0.61.0"
 snakeviz = "^2.2.2"
 torch-tb-profiler = "^0.4.3"
 tensorboard-plugin-profile = "^2.18.0"
+psutil = "^6.1.1"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
 mkdocstrings = {extras = ["python"], version = "^0.26.2"}
 mkdocs-material = "^9.5.43"
 pygments = "^2.18.0"
+
+
+
+[tool.poetry.group.benchmarks.dependencies]
+asv = "^0.6.4"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
