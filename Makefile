@@ -12,6 +12,9 @@ PYTHON_VERSION ?= 3.11
 
 .PHONY: init-env init benchmark check-toml lint-src format lint quality audit test test-all all clean info build-docs
 
+init-conda-env:
+	conda env create --file benchmarks/conda-env.yaml
+
 init-env:
 	@if [ ! -f .env ]; then \
 		echo "Creating .env file..."; \
