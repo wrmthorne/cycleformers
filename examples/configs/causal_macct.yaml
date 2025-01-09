@@ -13,14 +13,15 @@ per_device_eval_batch_size: 4
 eval_strategy: steps
 eval_steps: 100
 logging_strategy: steps
-logging_steps: 4
-report_to: wandb
-run_name: Qwen2.5-7B-macct
+logging_steps: 1
+
+report_to: "wandb"
+run_name: "Qwen2.5-3B-macct"
 
 
 # === Model Configs === #
-model_name_or_path: "Qwen/Qwen2.5-7B"
-torch_dtype: "bfloat16"
+model_name_or_path: "Qwen/Qwen2.5-3B"
+torch_dtype: bfloat16
 
 # Lora
 use_peft: true

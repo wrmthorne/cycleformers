@@ -19,7 +19,7 @@ lora_r: 32
 lora_alpha: 64
 use_rslora: true
 lora_dropout: 0.05
-lora_target_modules: "all-linear"
+# lora_target_modules: "all-linear"
 lora_task_type: "CAUSAL_LM"
 
 # Optimisation

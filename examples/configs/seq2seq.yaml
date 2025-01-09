@@ -12,6 +12,7 @@ logging_steps: 1
 
 # === Model Configs === #
 model_name_or_path: "google/flan-t5-base"
+A_torch_dtype: "bfloat16"
 
 # Optimisation
 # attn_implementation: "flash_attention_2"

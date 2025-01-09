@@ -600,7 +600,7 @@ class CycleTrainer(Trainer):
         map_kwargs = {
             "batched": True,
             "remove_columns": dataset.column_names if remove_unused_columns else None,
-            "batch_size": 4,  # FIXME: self.dataset_batch_size,
+            "batch_size": 2,  # FIXME: self.dataset_batch_size,
         }
 
         if isinstance(dataset, datasets.Dataset):
@@ -833,7 +833,6 @@ class CycleTrainer(Trainer):
 
         previous_adapter = model.active_adapter
         try:
-            # We know adapter_name is str here because we checked for None above
             adapter_str: str = adapter_name
             if isinstance(model, PeftModel):
                 model.set_adapter(adapter_str)
