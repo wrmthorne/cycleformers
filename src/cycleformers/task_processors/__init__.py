@@ -5,6 +5,7 @@ Each processor handles a specific dataset format or task type (e.g., NER, machin
 common functionality through the base class.
 """
 
+from .auto import AutoProcessor
 from .base import BaseProcessor, ProcessorConfig
 from .ner import CONLL2003Processor, CONLL2003ProcessorConfig
 from .translation import TranslationProcessor, TranslationProcessorConfig
@@ -17,4 +18,5 @@ __all__ = [
     "ProcessorConfig",
     "TranslationProcessor",
     "TranslationProcessorConfig",
+    "AutoProcessor",
 ]
