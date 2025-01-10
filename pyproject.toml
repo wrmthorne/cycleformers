@@ -132,6 +132,9 @@ markers = [
     "meta: mark test as a test of the testing framework (run with --meta to enable)",
     "requires_gpu: mark test as requiring a GPU or taking far too long to run on a CPU (skip with --no-gpu)"
 ]
+filterwarnings = [
+    "ignore::UserWarning",
+]
 
 [tool.coverage.run]
 data_file = ".coverage"
