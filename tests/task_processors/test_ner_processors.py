@@ -4,6 +4,9 @@ AWAITING REFACTOR
 
 from pathlib import Path
 
+import pytest
+
+from cycleformers.cycle_trainer_utils import EvalGeneration
 from cycleformers.task_processors.ner import CONLL2003Processor, CONLL2003ProcessorConfig
 
 
@@ -28,8 +31,8 @@ class TestCONLL2003Processor:
         assert set(dataset_B.keys()) == {"train", "validation", "test"}
 
         # Check that training data is non-parallel (no labels)
-        assert "label" not in dataset_A["train"].column_names
-        assert "label" not in dataset_B["train"].column_names
+        assert "labels" not in dataset_A["train"].column_names
+        assert "labels" not in dataset_B["train"].column_names
 
         # Verify training splits are properly shuffled and unaligned
         train_texts_A = dataset_A["train"]["text"]
@@ -55,7 +58,66 @@ class TestCONLL2003Processor:
 
         # Check that evaluation splits maintain parallel data
         for key in ["validation", "test"]:
-            assert dataset_A[key]["text"] == dataset_B[key]["label"]
-            assert dataset_A[key]["label"] == dataset_B[key]["text"]
+            assert dataset_A[key]["text"] == dataset_B[key]["labels"]
+            assert dataset_A[key]["labels"] == dataset_B[key]["text"]
             assert dataset_A[key]["text"] != dataset_B[key]["text"]
-            assert dataset_A[key]["label"] != dataset_B[key]["label"]
+            assert dataset_A[key]["labels"] != dataset_B[key]["labels"]
+
+    @pytest.mark.parametrize(
+        "test_case, predictions, labels, expected_f1, expected_accuracy",
+        [
+            (
+                "perfect_match",
+                ["John Smith | person | Google | organization"],
+                ["John Smith | person | Google | organization"],
+                1.0,
+                1.0,
+            ),
+            (
+                "completely_wrong",
+                ["John Smith | organization | Google | person"],
+                ["John Smith | person | Google | organization"],
+                0.0,
+                None,  # We don't check accuracy for wrong predictions
+            ),
+            (
+                "partial_match",
+                ["John Smith | person | Google | person"],
+                ["John Smith | person | Google | organization"],
+                pytest.approx(0.5, abs=0.5),  # Should be between 0 and 1
+                None,
+            ),
+            ("empty_prediction", [""], ["John Smith | person"], 0.0, None),
+            (
+                "invalid_format",
+                ["Invalid format", "Just text | invalid"],
+                ["John Smith | person", "Google | organization"],
+                0.0,
+                None,
+            ),
+            (
+                "multiple_entities",
+                [
+                    "John Smith | person | Google | organization | New York | location",
+                    "Microsoft | organization | Apple | organization",
+                ],
+                [
+                    "John Smith | person | Google | organization | New York | location",
+                    "Microsoft | organization | Apple | organization",
+                ],
+                1.0,
+                1.0,
+            ),
+        ],
+    )
+    def test_calculate_metrics(self, test_case, predictions, labels, expected_f1, expected_accuracy):
+        """Test calculation of metrics for NER task with different scenarios."""
+        config = CONLL2003ProcessorConfig(sep_token=" | ")
+        processor = CONLL2003Processor(config)
+
+        eval_pred = EvalGeneration(predictions=predictions, labels=labels)
+        metrics = processor.compute_metrics(eval_pred)
+
+        assert metrics["overall_f1"] == expected_f1
+        if expected_accuracy is not None:
+            assert metrics["overall_accuracy"] == expected_accuracy

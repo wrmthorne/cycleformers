@@ -1,7 +1,11 @@
 from dataclasses import dataclass
+from itertools import zip_longest
 from typing import Literal
 
+import evaluate
 from datasets import DatasetDict
+
+from cycleformers.cycle_trainer_utils import EvalGeneration
 
 from .base import BaseProcessor, ProcessorConfig
 
@@ -93,7 +97,7 @@ def reconstruct_sentence(tokens: list[str]) -> str:
     return "".join(result)
 
 
-def ner_to_sequences(tokens: list[str], tags: list[int], sep_token: str) -> str:
+def bio_to_entity_seq(tokens: list[str], tags: list[int], sep_token: str) -> str:
     """Convert a list of tokens and their corresponding tags to a sequence of entity types.
 
     This function takes tokens and their NER tags and converts them into a sequence format
@@ -134,6 +138,73 @@ def ner_to_sequences(tokens: list[str], tags: list[int], sep_token: str) -> str:
     return f" {sep_token} ".join([" ".join(token_tags) for token_tags in compound_tokens])
 
 
+def format_tag_sequence(tags):
+    formatted = []
+    prev_tag = None
+    for tag in tags:
+        if tag == "O":
+            formatted.append("O")
+            prev_tag = None
+        elif tag != prev_tag:
+            formatted.append(f"B-{tag}")
+            prev_tag = tag
+        else:
+            formatted.append(f"I-{tag}")
+    return formatted
+
+
+def aligned_entity_seqs_to_tags(
+    preds: str | list[str], labels: str | list[str], sep_token: str
+) -> tuple[list[str], list[str]]:
+    """Convert aligned entity sequences to BI tags."""
+    # Handle empty sequences
+    if not preds or not labels:
+        return ["O"], ["O"]
+
+    # Handle both single strings and lists
+    if isinstance(preds, list):
+        all_pred_tags = []
+        all_label_tags = []
+        for pred, label in zip(preds, labels):
+            if isinstance(label, str):
+                pred_tags, label_tags = aligned_entity_seqs_to_tags(pred, label, sep_token)
+                all_pred_tags.extend(pred_tags)
+                all_label_tags.extend(label_tags)
+        # Handle case where we got no tags
+        if not all_pred_tags:
+            return ["O"], ["O"]
+        return all_pred_tags, all_label_tags
+
+    # At this point, mypy knows preds must be str
+    assert isinstance(preds, str)
+    assert isinstance(labels, str)
+
+    preds_parts = [[token.strip() for token in part.lower().strip().split()] for part in preds.split(sep_token)]
+    labels_parts = [[token.strip() for token in part.lower().strip().split()] for part in labels.split(sep_token)]
+
+    preds_tags = []
+    labels_tags = []
+    for p_toks, p_tags, l_toks, l_tags in zip(
+        preds_parts[::2], preds_parts[1::2], labels_parts[::2], labels_parts[1::2]
+    ):
+        p_tags += [p_tags[-1]] * (len(p_toks) - len(p_tags))
+        l_tags += [l_tags[-1]] * (len(l_toks) - len(l_tags))
+
+        zipped = list(zip_longest(p_toks, p_tags, l_toks, l_tags, fillvalue="O"))
+        _, p_tags_new, _, l_tags_new = map(list, zip(*zipped))
+
+        preds_tags.extend(format_tag_sequence(p_tags_new))
+        labels_tags.extend(format_tag_sequence(l_tags_new))
+
+    return preds_tags, labels_tags
+
+
+def maybe_valid_sentence_to_parts(sentence: str, sep_token: str) -> list[str]:
+    if not sentence or sep_token not in sentence:
+        return []
+    return [p.strip() for p in sentence.split(sep_token)]
+
+
 class CONLL2003Processor(BaseProcessor):
     """Processor for the CONLL2003 Named Entity Recognition dataset.
 
@@ -166,20 +237,34 @@ class CONLL2003Processor(BaseProcessor):
         # Ensure formatting of sep token is correct
         self.config: CONLL2003ProcessorConfig = config  # type annotation for config
         self.sep_token = config.sep_token.strip()
+        self.evaluation_metrics = ["f1", "accuracy"]
+
+    def compute_metrics(self, eval_pred: EvalGeneration) -> dict[str, float]:
+        """Compute metrics for NER task."""
+        metrics = evaluate.load("seqeval")
+
+        # Convert predictions and labels to aligned BI tags
+        predictions, references = aligned_entity_seqs_to_tags(eval_pred.predictions, eval_pred.labels, self.sep_token)
+
+        # Wrap predictions and references in lists since seqeval expects lists of sequences
+        predictions_list: list[list[str]] = [predictions]
+        references_list: list[list[str]] = [references]
+
+        return metrics.compute(predictions=predictions_list, references=references_list)
 
     def preprocess(self, dataset: DatasetDict) -> tuple[DatasetDict, DatasetDict]:
         original_cols = dataset["train"].column_names
         dataset = dataset.map(
             lambda x: {
                 "sentence": reconstruct_sentence(x["tokens"]),
-                "entity_seq": ner_to_sequences(x["tokens"], x["ner_tags"], self.sep_token),
+                "entity_seq": bio_to_entity_seq(x["tokens"], x["ner_tags"], self.sep_token),
             }
         ).remove_columns(original_cols)
 
-        dataset_A = dataset.map(lambda x: {"text": x["sentence"], "label": x["entity_seq"]})
-        dataset_B = dataset.map(lambda x: {"text": x["entity_seq"], "label": x["sentence"]})
+        dataset_A = dataset.map(lambda x: {"text": x["sentence"], "labels": x["entity_seq"]})
+        dataset_B = dataset.map(lambda x: {"text": x["entity_seq"], "labels": x["sentence"]})
 
-        dataset_A["train"] = dataset_A["train"].remove_columns(["label"])
-        dataset_B["train"] = dataset_B["train"].remove_columns(["label"])
+        dataset_A["train"] = dataset_A["train"].remove_columns(["labels"])
+        dataset_B["train"] = dataset_B["train"].remove_columns(["labels"])
 
         return dataset_A, dataset_B
