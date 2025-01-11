@@ -1,4 +1,5 @@
 import gc
+from dataclasses import dataclass
 from os import PathLike
 from typing import Any
 
@@ -7,6 +8,14 @@ from datasets import Dataset
 from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForSeq2SeqLM, PreTrainedModel
 
 from cycleformers.exceptions import CycleModelError
+
+
+@dataclass
+class EvalGeneration:
+    """Class for storing evaluation generation results."""
+
+    predictions: list[str]
+    labels: list[str]
 
 
 def load_model(model_path: str | PathLike[str], **model_init_kwargs: dict[str, Any]) -> PreTrainedModel:

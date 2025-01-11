@@ -51,7 +51,14 @@ class TrainerTestMixin:
         return Dataset.from_dict({"text": ["Hello world", "How are you?", "Testing is fun"]})
 
     @pytest.fixture
-    def default_trainer(self, any_model_and_tokenizer_pairs, text_dataset):
+    def eval_text_dataset(self):
+        """Create a simple text dataset for testing."""
+        return Dataset.from_dict(
+            {"text": ["Hello world", "How are you?", "Testing is fun"], "labels": ["A", "B", "C"]}
+        )
+
+    @pytest.fixture
+    def default_trainer(self, any_model_and_tokenizer_pairs, text_dataset, eval_text_dataset):
         """Create a default trainer instance with common configuration."""
         model_and_tokenizer_A, model_and_tokenizer_B = any_model_and_tokenizer_pairs
         model_A, tokenizer_A = model_and_tokenizer_A
@@ -63,10 +70,12 @@ class TrainerTestMixin:
             tokenizers={"A": tokenizer_A, "B": tokenizer_B},
             train_dataset_A=text_dataset,
             train_dataset_B=text_dataset,
+            eval_dataset_A=eval_text_dataset,
+            eval_dataset_B=eval_text_dataset,
         )
 
     @pytest.fixture
-    def same_model_trainer(self, same_model_and_tokenizer_pairs, text_dataset):
+    def same_model_trainer(self, same_model_and_tokenizer_pairs, text_dataset, eval_text_dataset):
         """Create a trainer instance with two identical models."""
         model_and_tokenizer_A, model_and_tokenizer_B = same_model_and_tokenizer_pairs
         model_A, tokenizer_A = model_and_tokenizer_A
@@ -74,14 +83,16 @@ class TrainerTestMixin:
 
         return CycleTrainer(
             args=self.default_args,
-            models={"A": model_A, "B": model_B},
+            models={"A": model_A, "B": model_A},
             tokenizers=tokenizer_A,
             train_dataset_A=text_dataset,
             train_dataset_B=text_dataset,
+            eval_dataset_A=eval_text_dataset,
+            eval_dataset_B=eval_text_dataset,
         )
 
     @pytest.fixture
-    def macct_trainer(self, any_peft_model_and_tokenizer, text_dataset):
+    def macct_trainer(self, any_peft_model_and_tokenizer, text_dataset, eval_text_dataset):
         """Create a trainer instance with MACCT mode."""
         model, tokenizer = any_peft_model_and_tokenizer
         args = self.default_args
@@ -93,6 +104,8 @@ class TrainerTestMixin:
             tokenizers=tokenizer,
             train_dataset_A=text_dataset,
             train_dataset_B=text_dataset,
+            eval_dataset_A=eval_text_dataset,
+            eval_dataset_B=eval_text_dataset,
         )
 
     def assert_checkpoint_exists(self, checkpoint_dir: Path, is_macct: bool = False, save_only_model: bool = False):
@@ -582,3 +595,98 @@ class TestSaveCheckpoint(TrainerTestMixin):
 
         assert (checkpoint_dir / "A" / "training_args.bin").exists()
         assert (checkpoint_dir / "B" / "training_args.bin").exists()
+
+
+class TestEvaluate(TrainerTestMixin):
+    """Tests for evaluation functionality."""
+
+    def test_evaluate_no_compute_metrics(self, default_trainer):
+        """Test evaluation with no compute metrics function."""
+        default_trainer.compute_metrics = None
+        metrics = default_trainer.evaluate()
+        assert isinstance(metrics, dict)
+        assert len(metrics) == 0
+
+    def test_evaluate_callable_compute_metrics(self, default_trainer):
+        """Test evaluation with a callable compute metrics function."""
+
+        def compute_metrics(eval_pred):
+            return {"accuracy": 0.9}
+
+        default_trainer.compute_metrics = compute_metrics
+        metrics = default_trainer.evaluate()
+        assert isinstance(metrics, dict)
+        assert all(f"eval_accuracy_{model}" in metrics.keys() for model in ["A", "B"])
+
+    @pytest.mark.parametrize(
+        "compute_metrics_dict",
+        [
+            {},  # Empty dict
+            {"A": lambda x: {"score": 0.8}},  # Only model A
+            {"B": lambda x: {"score": 0.7}},  # Only model B
+            {  # Both models
+                "A": lambda x: {"score": 0.8},
+                "B": lambda x: {"score": 0.7},
+            },
+        ],
+        ids=["empty_dict", "only_A", "only_B", "both"],
+    )
+    def test_evaluate_dict_compute_metrics(self, default_trainer, compute_metrics_dict):
+        """Test evaluation with different compute_metrics dictionary configurations."""
+        default_trainer.compute_metrics = compute_metrics_dict
+        metrics = default_trainer.evaluate()
+        assert isinstance(metrics, dict)
+
+        # Check metrics based on configuration
+        if not compute_metrics_dict:
+            assert len(metrics) == 0
+        else:
+            if "A" in compute_metrics_dict:
+                assert "eval_score_A" in metrics
+            if "B" in compute_metrics_dict:
+                assert "eval_score_B" in metrics
+
+    def test_evaluate_with_custom_datasets(self, default_trainer, eval_text_dataset):
+        """Test evaluation with custom evaluation datasets."""
+
+        def compute_metrics(eval_pred):
+            return {"accuracy": 0.95}
+
+        default_trainer.compute_metrics = compute_metrics
+
+        metrics = default_trainer.evaluate(eval_dataset={"A": eval_text_dataset, "B": eval_text_dataset})
+        assert isinstance(metrics, dict)
+        assert all(f"eval_accuracy_{model}" in metrics.keys() for model in ["A", "B"])
+
+    def test_evaluate_ignore_keys(self, default_trainer):
+        """Test evaluation with ignored metrics."""
+
+        def compute_metrics(eval_pred):
+            # Make sure we have predictions and labels
+            assert eval_pred.predictions is not None
+            assert eval_pred.labels is not None
+            return {"metric1": 0.8, "metric2": 0.9}
+
+        default_trainer.compute_metrics = compute_metrics
+
+        # Evaluate with ignored keys
+        metrics = default_trainer.evaluate(ignore_keys=["metric1"])
+        assert isinstance(metrics, dict)
+        assert all("metric1" not in k for k in metrics.keys())
+        assert any("metric2" in k for k in metrics.keys())
+
+    def test_evaluate_metric_key_prefix(self, default_trainer):
+        """Test evaluation with custom metric key prefix."""
+
+        def compute_metrics(eval_pred):
+            # Make sure we have predictions and labels
+            assert eval_pred.predictions is not None
+            assert eval_pred.labels is not None
+            return {"score": 0.85}
+
+        default_trainer.compute_metrics = compute_metrics
+
+        # Evaluate with custom prefix
+        metrics = default_trainer.evaluate(metric_key_prefix="test")
+        assert isinstance(metrics, dict)
+        assert any("test_score" in k for k in metrics.keys())

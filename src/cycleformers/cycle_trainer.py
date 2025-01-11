@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from os import PathLike
 from pathlib import Path
 from types import MethodType
-from typing import TYPE_CHECKING, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 import datasets
 import torch
@@ -39,7 +39,7 @@ from transformers.trainer_callback import (
 )
 from transformers.trainer_utils import TrainerMemoryTracker, TrainOutput
 
-from .cycle_trainer_utils import PreTrainingSummary, load_model
+from .cycle_trainer_utils import EvalGeneration, PreTrainingSummary, load_model
 from .cycles import PrepareCycleInputsNotSet, _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
 from .exceptions import CycleModelError, InvalidCycleKeyError, MACCTModelError, MissingModelError
 from .import_utils import is_liger_kernel_available, is_peft_available
@@ -72,6 +72,12 @@ class PeftModelProtocol(Protocol):
 
 # Type variable for PEFT models, bound to our protocol
 PeftModelType = TypeVar("PeftModelType", bound=PeftModelProtocol)
+
+# Define the compute metrics function type
+ComputeMetricsFn = Callable[[EvalGeneration], dict[Any, Any]]
+
+# Earlier in the class definition, declare compute_metrics with proper typing
+compute_metrics: ComputeMetricsFn | dict[str, ComputeMetricsFn] | None
 
 
 class CycleTrainer(Trainer):
@@ -184,6 +190,7 @@ class CycleTrainer(Trainer):
         eval_dataset_B: datasets.Dataset | None = None,
         data_collator_A: DataCollatorWithPadding | DataCollatorForSeq2Seq | None = None,
         data_collator_B: DataCollatorWithPadding | DataCollatorForSeq2Seq | None = None,
+        compute_metrics: dict[str, Callable[[EvalGeneration], dict]] | Callable[[EvalGeneration], dict] | None = None,
         callbacks: list[TrainerCallback] | None = None,
         peft_configs: "PeftConfig | dict[str, PeftConfig] | None" = None,
     ):
@@ -377,6 +384,7 @@ class CycleTrainer(Trainer):
 
         # TODO: Expose through config
         self.sep_seq = DEFAULT_SEP_SEQ
+        self.compute_metrics = compute_metrics
 
         # TODO: Separate our train and eval if we support multiple eval datasets
         for dataset, tokenizer, model, attr_name in [
@@ -574,14 +582,30 @@ class CycleTrainer(Trainer):
                 return_length=False,
             )
 
+            labels = {}
+            if "labels" in element:
+                labels = processing_class(
+                    element["labels"],
+                    add_special_tokens=add_special_tokens,
+                    truncation=True,
+                    padding=False,
+                    max_length=max_seq_length,
+                    return_overflowing_tokens=False,
+                    return_length=False,
+                )
+
             if formatting_func is not None and not isinstance(formatting_func(element), list):
                 raise ValueError(
                     "The `formatting_func` should return a list of processed strings since it can lead to silent bugs."
                 )
             del texts
-            return {"input_ids": outputs["input_ids"], "attention_mask": outputs["attention_mask"]}
 
-        signature_columns = ["input_ids", "labels", "attention_mask"]
+            samples = {"input_ids": outputs["input_ids"], "attention_mask": outputs["attention_mask"]}
+            if labels:
+                samples["labels"] = labels["input_ids"]
+            return samples
+
+        signature_columns = ["input_ids", "attention_mask", "labels"]
 
         if dataset.column_names is not None:  # None for IterableDataset
             extra_columns = list(set(dataset.column_names) - set(signature_columns))
@@ -702,6 +726,10 @@ class CycleTrainer(Trainer):
         # Must start as early as possible
         self._memory_tracker.start()
 
+        # Clear memory and caches
+        self.accelerator.free_memory()
+        torch.cuda.empty_cache()
+
         args = self.args
         optimizer_A = self.optimizer_A
         optimizer_B = self.optimizer_B
@@ -784,7 +812,6 @@ class CycleTrainer(Trainer):
                 )
 
                 del batch_A, batch_B
-                torch.cuda.empty_cache()
 
                 # Update state and check control flow
                 self.state.global_step += 1
@@ -937,7 +964,11 @@ class CycleTrainer(Trainer):
 
         # Cleanup
         del synth_batch, synth_batch_ids, loss, outputs
-        torch.cuda.empty_cache()
+        if (
+            self.args.torch_empty_cache_steps is not None
+            and self.state.global_step % self.args.torch_empty_cache_steps == 0
+        ):
+            torch.cuda.empty_cache()
 
         return metrics
 
@@ -1010,62 +1041,105 @@ class CycleTrainer(Trainer):
         """
         raise PrepareCycleInputsNotSet()
 
-    def evaluate(self, ignore_keys=None) -> dict[str, torch.Tensor]:
-        """Evaluate the models during training.
+    def evaluate(
+        self,
+        eval_dataset: dict[str, datasets.Dataset] | None = None,
+        ignore_keys: list[str] | None = None,
+        metric_key_prefix: str = "eval",
+    ) -> dict[str, float]:
+        """Evaluate the model(s) on the evaluation dataset.
 
-        This method evaluates the models during training to monitor progress and adjust training parameters.
-        It calculates the loss for both models and returns a dictionary with the evaluation metrics.
+        This method supports both regular two-model training and adapter-based training (MACCT).
+        It can evaluate either or both models based on the compute_metrics configuration.
 
         Args:
-            ignore_keys (list[str] | None): List of keys to ignore in the evaluation metrics
+            eval_dataset (Optional[Dict[str, Dataset]]): Dictionary containing evaluation datasets
+                for models A and/or B. If None, uses self.eval_dataset_A/B.
+            ignore_keys (Optional[List[str]]): List of metrics to ignore in the output.
+            metric_key_prefix (str): Prefix for metric keys in the output dictionary.
 
         Returns:
-            dict[str, torch.Tensor]: Dictionary containing evaluation metrics for both models
-
-        Examples:
-            >>> trainer = CycleTrainer(args, models, tokenizers)
-            >>> metrics = trainer.evaluate()
-            >>> print(metrics)
-            {'eval_loss_A': 2.1, 'eval_loss_B': 1.9}
-
-            Ignore specific metrics:
-            >>> metrics = trainer.evaluate(ignore_keys=['eval_loss_B'])
-            >>> print(metrics)
-            {'eval_loss_A': 2.1}
+            Dict[str, float]: Dictionary containing all evaluation metrics.
         """
-        # Must start as early as possible
         self._memory_tracker.start()
 
+        if eval_dataset is not None and not isinstance(eval_dataset, dict):
+            raise ValueError("eval_dataset must be a dictionary with model names as keys")
+
+        # Initialize metrics dictionary
         metrics = {}
+        models_to_evaluate = []
 
-        # Evaluate model A
-        self.model_A.eval()
-        losses_A = []
+        if self.compute_metrics is None or not self.compute_metrics:
+            return {}
 
-        eval_dataloader_A = self.get_eval_dataloader(self.eval_dataset_A, self.data_collator_A)
-        total_A = len(eval_dataloader_A)
+        if isinstance(self.compute_metrics, dict):
+            models_to_evaluate = list(self.compute_metrics.keys())
+        elif callable(self.compute_metrics):
+            models_to_evaluate = ["A", "B"]
 
-        for batch in tqdm(eval_dataloader_A, total=total_A, desc="Evaluating Model A"):
-            with torch.no_grad():
-                outputs = self.model_A(**batch)
-                loss = outputs.loss
-                losses_A.append(loss.detach().cpu())
+        for model_name in models_to_evaluate:
+            model = getattr(self, f"model_{model_name}")
+            tokenizer = getattr(self, f"tokenizer_{model_name}")
+            if eval_dataset is not None and model_name in eval_dataset:
+                # FIXME: Update when values aren't hardcoded
+                eval_dataset_current = self._prepare_dataset(
+                    eval_dataset[model_name],
+                    processing_class=tokenizer,
+                    text_column="text",
+                    max_seq_length=None,
+                    remove_unused_columns=True,
+                    is_encoder_decoder=self._get_config(model).is_encoder_decoder,
+                    formatting_func=None,
+                    add_special_tokens=True,
+                    skip_prepare_dataset=False,
+                )
+            else:
+                eval_dataset_current = getattr(self, f"eval_dataset_{model_name}")
+            data_collator = getattr(self, f"data_collator_{model_name}")
 
-        metrics["eval_loss_A"] = torch.mean(torch.tensor(losses_A))
+            if self.is_macct_model:
+                model.set_adapter(model_name)
 
-        # Evaluate model B
-        self.model_B.eval()
-        losses_B = []
+            model.eval()
 
-        eval_dataloader_B = self.get_eval_dataloader(self.eval_dataset_B, self.data_collator_B)
-        total_B = len(eval_dataloader_B)
+            eval_dataloader = self.get_eval_dataloader(eval_dataset_current, data_collator)
 
-        for batch in tqdm(eval_dataloader_B, total=total_B, desc="Evaluating Model B"):
-            with torch.no_grad():
-                outputs = self.model_B(**batch)
-                loss = outputs.loss
-                losses_B.append(loss.detach().cpu())
+            all_preds = []
+            all_labels = []
+            for batch in tqdm(eval_dataloader, desc=f"Evaluating Model {model_name}"):
+                with torch.no_grad():
+                    # gen_config = # TODO: Need to accept generation config for models
+                    outputs = model.generate(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch.get("attention_mask", None),
+                        # generation_config=gen_config,
+                    )
+                    all_preds.extend(outputs.cpu().numpy())
+                    all_labels.extend(batch["labels"].cpu().numpy())
 
-        metrics["eval_loss_B"] = torch.mean(torch.tensor(losses_B))
+            if self.compute_metrics is not None:
+                eval_preds = EvalGeneration(
+                    predictions=tokenizer.batch_decode(all_preds, skip_special_tokens=True),
+                    labels=tokenizer.batch_decode(all_labels, skip_special_tokens=True),
+                )
+
+                if isinstance(self.compute_metrics, dict):
+                    compute_metrics_fn: ComputeMetricsFn | None = self.compute_metrics.get(model_name)
+                else:
+                    compute_metrics_fn = cast(ComputeMetricsFn, self.compute_metrics)
+
+                if compute_metrics_fn is not None:
+                    computed_metrics = compute_metrics_fn(eval_preds)
+
+                    # remove keys to ignore
+                    if ignore_keys is not None:
+                        computed_metrics = {k: v for k, v in computed_metrics.items() if k not in ignore_keys}
+
+                    computed_metrics = {
+                        f"{metric_key_prefix}_{k}_{model_name}": v for k, v in computed_metrics.items()
+                    }
+                    metrics.update(computed_metrics)
+
         self._memory_tracker.stop_and_update_metrics(metrics)
         return metrics
