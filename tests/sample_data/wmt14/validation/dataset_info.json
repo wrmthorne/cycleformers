@@ -6,23 +6,23 @@
   "dataset_size": 1359920533,
   "description": "",
   "download_checksums": {
-    "hf://datasets/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00000-of-00003.parquet": {
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00000-of-00003.parquet": {
       "num_bytes": 279527247,
       "checksum": null
     },
-    "hf://datasets/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00001-of-00003.parquet": {
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00001-of-00003.parquet": {
       "num_bytes": 264970514,
       "checksum": null
     },
-    "hf://datasets/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00002-of-00003.parquet": {
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/train-00002-of-00003.parquet": {
       "num_bytes": 272987200,
       "checksum": null
     },
-    "hf://datasets/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/validation-00000-of-00001.parquet": {
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/validation-00000-of-00001.parquet": {
       "num_bytes": 473798,
       "checksum": null
     },
-    "hf://datasets/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/test-00000-of-00001.parquet": {
+    "hf://datasets/wmt/wmt14@b199e406369ec1b7634206d3ded5ba45de2fe696/de-en/test-00000-of-00001.parquet": {
       "num_bytes": 508753,
       "checksum": null
     }

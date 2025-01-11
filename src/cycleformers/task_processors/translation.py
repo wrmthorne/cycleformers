@@ -1,9 +1,24 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import evaluate
 from datasets import DatasetDict, IterableDatasetDict
 
 from .base import BaseProcessor, ProcessorConfig
+
+
+# Create a single metricc object with sacrebleu, chrf, meteor, bertscore and rouge
+# bertscore = evaluate.load("bertscore")
+# bertscore.compute = partial(bertscore.compute, lang="en")
+
+metrics = {
+    "sacrebleu": evaluate.load("sacrebleu"),
+    "rouge": evaluate.load("rouge"),
+    # "meteor": evaluate.load("meteor"),
+    # "bertscore": bertscore,
+}
+
+eval_cls = evaluate.combine(metrics, force_prefix=True)
 
 
 @dataclass
@@ -112,6 +127,9 @@ class TranslationProcessor(BaseProcessor):
                 "target": example[target_col],
             }
 
+    def compute_metrics(self, EvalGeneration):
+        return eval_cls.compute(predictions=EvalGeneration.predictions, references=EvalGeneration.labels)
+
     def preprocess(self, dataset: DatasetDict | IterableDatasetDict) -> tuple[DatasetDict, DatasetDict]:
         """Preprocess the dataset into two separate datasets for cycle training.
 
@@ -128,10 +146,10 @@ class TranslationProcessor(BaseProcessor):
         dataset = dataset.map(self._extract_text_pair)
         dataset = dataset.remove_columns(original_cols - {"source", "target"})
 
-        dataset_A = dataset.map(lambda x: {"text": x["source"], "label": x["target"]})
-        dataset_B = dataset.map(lambda x: {"text": x["target"], "label": x["source"]})
+        dataset_A = dataset.map(lambda x: {"text": x["source"], "labels": x["target"]})
+        dataset_B = dataset.map(lambda x: {"text": x["target"], "labels": x["source"]})
 
-        dataset_A["train"] = dataset_A["train"].remove_columns(["label"])
-        dataset_B["train"] = dataset_B["train"].remove_columns(["label"])
+        dataset_A["train"] = dataset_A["train"].remove_columns(["labels"])
+        dataset_B["train"] = dataset_B["train"].remove_columns(["labels"])
 
         return dataset_A, dataset_B

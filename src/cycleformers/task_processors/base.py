@@ -5,6 +5,8 @@ from pathlib import Path
 
 from datasets import DatasetDict, load_dataset, load_from_disk
 
+from cycleformers.cycle_trainer_utils import EvalGeneration
+
 
 @dataclass
 class ProcessorConfig:
@@ -21,6 +23,7 @@ class ProcessorConfig:
     # split: list[str] | str | None = None FIXME: not a key feature right now - taking too much time
     max_samples: int | None = None
     streaming: bool = False  # FIXME: not a key feature right now - taking too much time
+    evaluation_metrics: list[str] | None = None
 
 
 class BaseProcessor(ABC):
@@ -68,6 +71,11 @@ class BaseProcessor(ABC):
     @abstractmethod
     def preprocess(self, dataset: DatasetDict) -> DatasetDict:
         """Preprocess the dataset into two separate datasets A and B."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def compute_metrics(self, eval_pred: EvalGeneration) -> dict[str, float]:
+        """Compute metrics for the task."""
         raise NotImplementedError
 
     def process(self) -> DatasetDict:

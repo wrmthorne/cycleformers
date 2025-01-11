@@ -16,6 +16,7 @@ torch = "^2.5.0"
 datasets = "^3.0.2"
 typing-extensions = {version = "^4.12.2", python = ">=3.8,<3.12"}
 peft = "^0.13.2" # TODO: Add importutils is_peft_available methods and remove dependency
+evaluate = "^0.4.3"
 
 [tool.poetry.group.dev.dependencies]
 bandit = "^1.8.0"
@@ -41,6 +42,7 @@ torch-tb-profiler = "^0.4.3"
 tensorboard-plugin-profile = "^2.18.0"
 psutil = "^6.1.1"
 wandb = "^0.19.2"
+asv = "^0.6.4"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.6.1"
@@ -48,10 +50,14 @@ mkdocstrings = {extras = ["python"], version = "^0.26.2"}
 mkdocs-material = "^9.5.43"
 pygments = "^2.18.0"
 
+[tool.poetry.group.ner.dependencies]
+seqeval = "^1.2.2"
 
-
-[tool.poetry.group.benchmarks.dependencies]
-asv = "^0.6.4"
+[tool.poetry.group.translation.dependencies]
+sacrebleu = "^2.5.1"
+rouge = "^1.0.1"
+nltk = "^3.9.1"
+rouge-score = "^0.1.2"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
@@ -123,7 +129,7 @@ line-ending = "auto"
 "__init__.py" = ["F401"]
 
 [[tool.mypy.overrides]]
-module = "accelerate.*,datasets.*,transformers.*"
+module = "accelerate.*,datasets.*,transformers.*,evaluate.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

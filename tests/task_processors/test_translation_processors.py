@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from datasets import Dataset, DatasetDict
 
+from cycleformers.cycle_trainer_utils import EvalGeneration
 from cycleformers.task_processors.translation import TranslationProcessor, TranslationProcessorConfig
 
 
@@ -32,8 +33,8 @@ class TestTranslationProcessor:
         assert set(dataset_B.keys()) == {"train", "validation", "test"}
 
         # Check that training data is non-parallel (no labels)
-        assert "label" not in dataset_A["train"].column_names
-        assert "label" not in dataset_B["train"].column_names
+        assert "labels" not in dataset_A["train"].column_names
+        assert "labels" not in dataset_B["train"].column_names
 
         # Verify training splits are properly shuffled and unaligned
         train_texts_A = dataset_A["train"]["text"]
@@ -60,10 +61,10 @@ class TestTranslationProcessor:
 
         # Check that evaluation splits maintain parallel data
         for key in ["validation", "test"]:
-            assert dataset_A[key]["text"] == dataset_B[key]["label"]
-            assert dataset_A[key]["label"] == dataset_B[key]["text"]
+            assert dataset_A[key]["text"] == dataset_B[key]["labels"]
+            assert dataset_A[key]["labels"] == dataset_B[key]["text"]
             assert dataset_A[key]["text"] != dataset_B[key]["text"]
-            assert dataset_A[key]["label"] != dataset_B[key]["label"]
+            assert dataset_A[key]["labels"] != dataset_B[key]["labels"]
 
     def test_preprocess_flat_format(self):
         """Test preprocessing of datasets with flat source/target columns."""
@@ -116,7 +117,7 @@ class TestTranslationProcessor:
 
         # Check evaluation data is parallel
         assert dataset_A["test"][0]["text"] == "Test"
-        assert dataset_A["test"][0]["label"] == "Test"
+        assert dataset_A["test"][0]["labels"] == "Test"
 
     def test_custom_preprocessing(self):
         """Test preprocessing with a custom preprocessing function."""
@@ -173,4 +174,26 @@ class TestTranslationProcessor:
 
         # Check evaluation data is parallel
         assert dataset_A["test"][0]["text"] == "Test"
-        assert dataset_A["test"][0]["label"] == "Test"
+        assert dataset_A["test"][0]["labels"] == "Test"
+
+    @pytest.mark.parametrize(
+        "test_case, predictions, labels, expected_bleu",
+        [
+            ("perfect_match", ["This is a sentence"], ["This is a sentence"], 100.0),
+            ("no_match", ["What in tarnation"], ["This is not a sentence"], 0.0),
+        ],
+    )
+    def test_compute_metrics(self, test_case, predictions, labels, expected_bleu):
+        """Test compute metrics for translation task."""
+        config = TranslationProcessorConfig(
+            dataset_name=SAMPLES_DIR / "wmt14",
+            source_column="source",
+            target_column="target",
+            dataset_seed=42,  # Fixed seed for reproducible tests
+        )
+        processor = TranslationProcessor(config)
+
+        eval_pred = EvalGeneration(predictions=predictions, labels=labels)
+        metrics = processor.compute_metrics(eval_pred)
+
+        assert pytest.approx(metrics["sacrebleu_score"], abs=0.1) == expected_bleu
