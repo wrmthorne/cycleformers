@@ -1,0 +1,84 @@
+datasets:
+  conll2003:
+    dataset_config:
+      dataset_name: "eriktks/conll2003"
+
+    models:
+      flan-t5-large:
+        model_args:
+          model_name_or_path: "google/flan-t5-small" # large
+          torch_dtype: "bfloat16"
+      
+  
+  wmt14:
+    dataset_config:
+      dataset_name: "wmt/wmt14"
+      config: "de-en"
+
+
+training_args:
+  output_dir: "benchmark_models/"
+  num_train_epochs: 1
+  max_steps: 20 # 1000 May remove limit later
+  report_to: "wandb"
+  logging_strategy: "steps"
+  eval_strategy: "epoch"
+  save_strategy: "epoch"
+
+
+models:
+  # flan-t5-large:
+  #   model_args:
+  #     model_name_or_path: "google/flan-t5-small"
+  #     torch_dtype: "bfloat16"
+  #     lora_r: 32
+  #     lora_alpha: 64
+  #     use_rslora: true
+  #     lora_dropout: 0.05
+  #     lora_task_type: "SEQ_2_SEQ_LM"
+
+  #   macct:
+  #     trainer_args:
+  #       use_macct: true
+  #       per_device_train_batch_size: 4
+  #       gradient_accumulation_steps: 8
+  #       logging_steps: 4
+  #       learning_rate: 0.0001
+
+  #     model_args:
+  #       use_peft: true
+
+  #   dual_model:
+  #     trainer_args:
+  #       per_device_train_batch_size: 2
+  #       gradient_accumulation_steps: 16
+  #       logging_steps: 2
+  #       learning_rate: 0.0001
+
+  llama3:
+    model_args:
+      model_name_or_path: "meta-llama/Llama-3.2-1B"
+      torch_dtype: "bfloat16"
+      lora_r: 32
+      lora_alpha: 64
+      use_rslora: true
+      lora_dropout: 0.05
+      lora_task_type: "CAUSAL_LM"
+
+    macct:
+      trainer_args:
+        use_macct: true
+        per_device_train_batch_size: 4
+        gradient_accumulation_steps: 8
+        logging_steps: 4
+        learning_rate: 0.0001
+
+      model_args:
+        use_peft: true
+
+    dual_model:
+      trainer_args:
+        per_device_train_batch_size: 1
+        gradient_accumulation_steps: 32
+        logging_steps: 1
+        learning_rate: 0.0001

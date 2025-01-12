@@ -21,6 +21,7 @@ wandb/
 examples/**/data/
 misc/
 benchmark_results/
+benchmark_models/
 .mypy_cache/
 .ruff_cache/
 profiles/

@@ -71,6 +71,8 @@ clean:
 	rm -rf dist/
 	rm -rf build/
 	rm -rf *.egg-info
+	rm -rf benchmarks/benchmarks_models
+	rm -rf benchmarks/profiler/profiles
 	find . -type d -name '__pycache__' -exec rm -rf {} +
 	find . -type d -name '.pytest_cache' -exec rm -rf {} +
 	find . -type d -name '.mypy_cache' -exec rm -rf {} +
