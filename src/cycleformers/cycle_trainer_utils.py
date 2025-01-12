@@ -5,7 +5,13 @@ from typing import Any
 
 import torch
 from datasets import Dataset
-from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForSeq2SeqLM, PreTrainedModel
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    PreTrainedModel,
+    PreTrainedTokenizerBase,
+)
 
 from cycleformers.exceptions import CycleModelError
 
@@ -19,15 +25,17 @@ class EvalGeneration:
 
 
 def load_model(model_path: str | PathLike[str], **model_init_kwargs: dict[str, Any]) -> PreTrainedModel:
+    """Handles instantiation of model and tokenizer given a path and a set of configs."""
     auto_config = AutoConfig.from_pretrained(model_path)
-    if "ForCausalLM" in auto_config.model_type:
+    if any("ForCausalLM" in architecture for architecture in auto_config.architectures):
         model = AutoModelForCausalLM.from_pretrained(model_path, **model_init_kwargs)
     elif auto_config.is_encoder_decoder:
         model = AutoModelForSeq2SeqLM.from_pretrained(model_path, **model_init_kwargs)
     else:
         raise CycleModelError(
-            "Unsupported or unrecognised model type. Make sure the provided model is either "
-            "CausalLM or Seq2SeqLM. If you are using a custom model, you may need to pass the instantiated model to "
+            f"Unsupported or unrecognised model type {auto_config.model_type} for model {model_path}. "
+            "Make sure the provided model is either CausalLM or Seq2SeqLM. "
+            "If you are using a custom model, you may need to pass the instantiated model to "
             "CycleTrainer."
         )
 
@@ -35,8 +43,48 @@ def load_model(model_path: str | PathLike[str], **model_init_kwargs: dict[str, A
     return model
 
 
+@dataclass
+class DataCollatorForLanguageModelingAndEval:
+    """Data collator which allows for custom labels to be used when evaluating on model generations."""
+
+    tokenizer: PreTrainedTokenizerBase
+    padding: bool = True
+    max_length: int | None = None
+    is_training: bool = True  # Add flag to handle train vs eval differently
+
+    def __call__(self, features: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+        batch = self.tokenizer.pad(
+            {"input_ids": [f["input_ids"] for f in features]},
+            padding=self.padding,
+            max_length=self.max_length,
+            return_tensors="pt",
+        )
+
+        # During training, handle labels as usual for causal LM
+        if self.is_training:
+            batch["labels"] = batch["input_ids"].clone()
+        # During eval, preserve the original labels for generation comparison
+        else:
+            if "labels" in features[0]:
+                batch["labels"] = torch.tensor([f["labels"] for f in features])
+            # You might also want to preserve original text
+            if "target_text" in features[0]:
+                batch["target_text"] = [f["target_text"] for f in features]
+
+        return batch
+
+
 class PreTrainingSummary:
-    """Provides a detailed summary of the training configuration and resource usage."""
+    """Provides a detailed summary of the training configuration and resource usage.
+
+    Currently displays:
+    - Mode (Multi-Adapter or Dual-Model)
+    - Model name and path
+    - Memory usage
+    - Parameter counts, trainable count and trainable percentage
+    - Dataset sizes
+    - Data types
+    """
 
     def __init__(
         self,
@@ -102,6 +150,28 @@ class PreTrainingSummary:
 
     def __str__(self) -> str:
         """Generate a formatted summary string."""
+        CONTENT_WIDTH = 66  # Width between borders (total 68 with borders)
+        BULLET = "-"  # Using simple hyphen for consistency
+
+        def format_line(line: str) -> str:
+            """Helper function to ensure proper line formatting with borders."""
+            if line.startswith("╔") or line.startswith("╟") or line.startswith("╠") or line.startswith("╚"):
+                return line
+
+            # Strip existing right border if present
+            content = line[:-1] if line.endswith("║") else line
+
+            # If line starts with left border, remove it for length calculation
+            if content.startswith("║"):
+                inner_content = content[1:]
+                # Calculate padding needed
+                padding = CONTENT_WIDTH - len(inner_content)
+                # Reconstruct line with proper padding
+                return f"║{inner_content}{' ' * padding}║"
+            else:
+                # For lines without borders (shouldn't happen in this case)
+                return f"║{content}{' ' * (CONTENT_WIDTH - len(content))}║"
+
         lines = [
             "",
             "╔══════════════════════════════════════════════════════════════╗",
@@ -110,49 +180,48 @@ class PreTrainingSummary:
         ]
 
         # Training mode
-        mode = "Multi-Adapter Training" if self.is_multi_adapter else "Standard Training"
-        # Get the first config's name or path
+        mode = "Multi-Adapter Training" if self.is_multi_adapter else "Dual-Model Training"
         first_config = next(iter(self.model_configs.values()))
-        lines.append(f"║ Mode: {mode:<54} ({first_config.name_or_path}) ║")
+        model_info = f" Mode: {mode} ({first_config.name_or_path})"
+        lines.append(format_line(f"║{model_info}"))
         lines.append("╟──────────────────────────────────────────────────────────────╢")
 
         # Model information
         for model_name, model in self.models.items():
-            lines.append(f"║ Model: {model_name:<53} ({model}) ║")
+            lines.append(format_line(f"║ Model: {model_name}"))
 
             # Memory usage
             mem_stats = self._get_memory_stats(model)
-            lines.append(f"║   • Memory Allocated: {mem_stats['allocated']:.1f}MB")
-            lines.append(f"║   • Memory Cached: {mem_stats['cached']:.1f}MB")
+            lines.append(format_line(f"║   {BULLET} Memory Allocated: {mem_stats['allocated']:.1f}MB"))
+            lines.append(format_line(f"║   {BULLET} Memory Cached: {mem_stats['cached']:.1f}MB"))
 
             # Parameter counts
             trainable, total = self._count_parameters(model)
-            lines.append(
-                f"║   • Parameters: {self._format_size(total)} total || "
+            param_line = (
+                f"║   {BULLET} Parameters: {self._format_size(total)} total || "
                 f"{self._format_size(trainable)} trainable || "
                 f"{trainable/total*100:.1f}%"
             )
+            lines.append(format_line(param_line))
 
             # Dataset sizes
             dataset_key = f"{model_name}_train" if model_name in ["A", "B"] else "train"
             if dataset_key in self.datasets:
                 try:
                     size = len(self.datasets[dataset_key])
-                    lines.append(f"║   • Training Samples: {size}")
+                    lines.append(format_line(f"║   {BULLET} Training Samples: {size}"))
                 except TypeError:
-                    lines.append("║   • Training Samples: N/A (dataset length not implemented)")
+                    lines.append(format_line(f"║   {BULLET} Training Samples: N/A (dataset length not implemented)"))
 
             # Data types
             dtypes = self._get_dtype_info(model)
-            lines.append(f"║   • Weight dtype: {dtypes['weights']}")
-            lines.append(f"║   • Gradient dtype: {dtypes['gradients'] or 'N/A'}")
+            lines.append(format_line(f"║   {BULLET} Weight dtype: {dtypes['weights']}"))
+            lines.append(format_line(f"║   {BULLET} Gradient dtype: {dtypes['gradients'] or 'N/A'}"))
             if "adapters" in dtypes:
-                lines.append(f"║   • Adapter dtype: {dtypes['adapters'] or 'N/A'}")
+                lines.append(format_line(f"║   {BULLET} Adapter dtype: {dtypes['adapters'] or 'N/A'}"))
 
             lines.append("╟──────────────────────────────────────────────────────────────╢")
 
         lines[-1] = "╚══════════════════════════════════════════════════════════════╝"
 
-        summary = "\n".join(line + " " * (69 - len(line)) + "║" if "║" not in line[-2:] else line for line in lines)
-        print(summary)
-        return summary
+        return "\n".join(lines)

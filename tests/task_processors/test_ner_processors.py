@@ -110,14 +110,16 @@ class TestCONLL2003Processor:
             ),
         ],
     )
-    def test_calculate_metrics(self, test_case, predictions, labels, expected_f1, expected_accuracy):
+    def test_calculate_metrics_A(self, test_case, predictions, labels, expected_f1, expected_accuracy):
         """Test calculation of metrics for NER task with different scenarios."""
         config = CONLL2003ProcessorConfig(sep_token=" | ")
         processor = CONLL2003Processor(config)
 
         eval_pred = EvalGeneration(predictions=predictions, labels=labels)
-        metrics = processor.compute_metrics(eval_pred)
+        metrics = processor.compute_metrics_A(eval_pred)
 
         assert metrics["overall_f1"] == expected_f1
         if expected_accuracy is not None:
             assert metrics["overall_accuracy"] == expected_accuracy
+
+    # TODO: Test compute_metrics

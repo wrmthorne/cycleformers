@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from .utils import prefixed_view
+from .utils import DEFAULT_SEP_SEQ, prefixed_view
 
 
 @dataclass
@@ -60,6 +60,7 @@ class ModelConfig:
     lora_task_type: str = "CAUSAL_LM"
     use_rslora: bool = False
     use_dora: bool = False
+    sequence_separator: str = DEFAULT_SEP_SEQ  # Put something distinct between prompt and response
 
     def __post_init__(self):
         self._A = None

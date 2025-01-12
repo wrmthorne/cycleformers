@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
@@ -20,7 +21,7 @@ class ProcessorConfig:
     eval_split_ratio: float = 0.2
     dataset_seed: int = 42
     cache_dir: str | None = None
-    # split: list[str] | str | None = None FIXME: not a key feature right now - taking too much time
+    split: list[str] | str | None = None
     max_samples: int | None = None
     streaming: bool = False  # FIXME: not a key feature right now - taking too much time
     evaluation_metrics: list[str] | None = None
@@ -74,8 +75,8 @@ class BaseProcessor(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def compute_metrics(self, eval_pred: EvalGeneration) -> dict[str, float]:
-        """Compute metrics for the task."""
+    def compute_metrics(self) -> dict[str, Callable[[EvalGeneration], dict[str, float]]]:
+        """Return single callable or dict of callables corresponding to the task in a dataset."""
         raise NotImplementedError
 
     def process(self) -> DatasetDict:

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import evaluate
 from datasets import DatasetDict, IterableDatasetDict
 
+from cycleformers.cycle_trainer_utils import EvalGeneration
+
 from .base import BaseProcessor, ProcessorConfig
 
 
@@ -127,8 +129,11 @@ class TranslationProcessor(BaseProcessor):
                 "target": example[target_col],
             }
 
-    def compute_metrics(self, EvalGeneration):
+    def compute_metrics_A_and_B(self, EvalGeneration):
         return eval_cls.compute(predictions=EvalGeneration.predictions, references=EvalGeneration.labels)
+
+    def compute_metrics(self) -> dict[str, Callable[[EvalGeneration], dict[str, float]]]:
+        return {"A": self.compute_metrics_A_and_B, "B": self.compute_metrics_A_and_B}
 
     def preprocess(self, dataset: DatasetDict | IterableDatasetDict) -> tuple[DatasetDict, DatasetDict]:
         """Preprocess the dataset into two separate datasets for cycle training.

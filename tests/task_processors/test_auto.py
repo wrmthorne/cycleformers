@@ -45,9 +45,9 @@ class TestAutoProcessor:
     def test_import_processor_class_invalid_path(self, dataset_name, config_cls, expected_processor):
         """Test that appropriate error is raised for invalid import paths."""
         with pytest.raises(ImportError):
-            AutoProcessor._import_processor_class("invalid.module.path")
+            AutoProcessor._import_task_class("invalid.module.path")
 
     def test_import_processor_class_invalid_class(self, dataset_name, config_cls, expected_processor):
         """Test that appropriate error is raised for valid module but invalid class."""
         with pytest.raises(ImportError):
-            AutoProcessor._import_processor_class("cycleformers.task_processors.ner.InvalidClass")
+            AutoProcessor._import_task_class("cycleformers.task_processors.ner.InvalidClass")

@@ -16,7 +16,6 @@ from tqdm import tqdm
 from transformers import (
     AutoTokenizer,
     DataCollatorForSeq2Seq,
-    DataCollatorWithPadding,
     PretrainedConfig,
     PreTrainedModel,
     PreTrainedTokenizerBase,
@@ -39,7 +38,7 @@ from transformers.trainer_callback import (
 )
 from transformers.trainer_utils import TrainerMemoryTracker, TrainOutput
 
-from .cycle_trainer_utils import EvalGeneration, PreTrainingSummary, load_model
+from .cycle_trainer_utils import DataCollatorForLanguageModelingAndEval, EvalGeneration, PreTrainingSummary, load_model
 from .cycles import PrepareCycleInputsNotSet, _default_prepare_cycle_inputs, _prepare_causal_skip_cycle_inputs
 from .exceptions import CycleModelError, InvalidCycleKeyError, MACCTModelError, MissingModelError
 from .import_utils import is_liger_kernel_available, is_peft_available
@@ -188,8 +187,8 @@ class CycleTrainer(Trainer):
         train_dataset_B: datasets.Dataset | None = None,
         eval_dataset_A: datasets.Dataset | None = None,
         eval_dataset_B: datasets.Dataset | None = None,
-        data_collator_A: DataCollatorWithPadding | DataCollatorForSeq2Seq | None = None,
-        data_collator_B: DataCollatorWithPadding | DataCollatorForSeq2Seq | None = None,
+        data_collator_A: DataCollatorForLanguageModelingAndEval | DataCollatorForSeq2Seq | None = None,
+        data_collator_B: DataCollatorForLanguageModelingAndEval | DataCollatorForSeq2Seq | None = None,
         compute_metrics: dict[str, Callable[[EvalGeneration], dict]] | Callable[[EvalGeneration], dict] | None = None,
         callbacks: list[TrainerCallback] | None = None,
         peft_configs: "PeftConfig | dict[str, PeftConfig] | None" = None,
@@ -372,15 +371,15 @@ class CycleTrainer(Trainer):
 
         if data_collator_A is None:
             if self._get_config(self.model_A).is_encoder_decoder:
-                self.data_collator_A = DataCollatorForSeq2Seq(tokenizer_A)
+                self.data_collator_A = DataCollatorForSeq2Seq(tokenizer_A, padding=True)
             else:
-                self.data_collator_A = DataCollatorWithPadding(tokenizer_A)
+                self.data_collator_A = DataCollatorForLanguageModelingAndEval(tokenizer_A, is_training=True)
 
         if data_collator_B is None:
             if self._get_config(self.model_B).is_encoder_decoder:
-                self.data_collator_B = DataCollatorForSeq2Seq(tokenizer_B)
+                self.data_collator_B = DataCollatorForSeq2Seq(tokenizer_B, padding=True)
             else:
-                self.data_collator_B = DataCollatorWithPadding(tokenizer_B)
+                self.data_collator_B = DataCollatorForLanguageModelingAndEval(tokenizer_B, is_training=True)
 
         # TODO: Expose through config
         self.sep_seq = DEFAULT_SEP_SEQ
@@ -740,6 +739,12 @@ class CycleTrainer(Trainer):
         tokenizer_A = self.tokenizer_A
         tokenizer_B = self.tokenizer_B
 
+        # Disable custom labels for causal training
+        if self._get_config(model_A).is_encoder_decoder and hasattr(self.data_collator_A, "is_training"):
+            self.data_collator_A.is_training = True
+        if self._get_config(model_B).is_encoder_decoder and hasattr(self.data_collator_B, "is_training"):
+            self.data_collator_B.is_training = True
+
         self.train_dataloader_A = self.get_train_dataloader(self.train_dataset_A, self.data_collator_A)
         self.train_dataloader_B = self.get_train_dataloader(self.train_dataset_B, self.data_collator_B)
 
@@ -772,12 +777,14 @@ class CycleTrainer(Trainer):
             self.evaluate()
 
         # TODO: Tidy this up
-        PreTrainingSummary(
+        pretrain_summary = PreTrainingSummary(
             {"A": self.model_A, "B": self.model_B},
             {"A": self._get_config(self.model_A), "B": self._get_config(self.model_B)},
             {"A_train": self.train_dataset_A, "B_train": self.train_dataset_B},
             self.is_macct_model,
         )
+        print(pretrain_summary)
+
         for epoch in range(epochs_trained, num_train_epochs):
             for idx, (batch_A, batch_B) in enumerate(zip(self.train_dataloader_A, self.train_dataloader_B)):
                 # Check if training should stop
@@ -830,7 +837,8 @@ class CycleTrainer(Trainer):
                 # Handle logging
                 if self.control.should_log:
                     metrics = {**metrics_A, **metrics_B}
-                    self.control = self.callback_handler.on_log(args, self.state, self.control, metrics)
+                    if metrics:
+                        self.control = self.callback_handler.on_log(args, self.state, self.control, metrics)
 
                 # Handle evaluation
                 if self.control.should_evaluate:
@@ -1098,6 +1106,10 @@ class CycleTrainer(Trainer):
                 eval_dataset_current = getattr(self, f"eval_dataset_{model_name}")
             data_collator = getattr(self, f"data_collator_{model_name}")
 
+            # Set dataloader to allow for custom labels
+            if not self._get_config(model).is_encoder_decoder and hasattr(data_collator, "is_training"):
+                data_collator.is_training = False
+
             if self.is_macct_model:
                 model.set_adapter(model_name)
 
@@ -1116,7 +1128,11 @@ class CycleTrainer(Trainer):
                         # generation_config=gen_config,
                     )
                     all_preds.extend(outputs.cpu().numpy())
-                    all_labels.extend(batch["labels"].cpu().numpy())
+
+                    # Prevents tokenizer attempting to decode labels
+                    labels = batch["labels"].cpu().numpy()
+                    labels[labels == -100] = tokenizer.pad_token_id
+                    all_labels.extend(labels)
 
             if self.compute_metrics is not None:
                 eval_preds = EvalGeneration(
@@ -1141,5 +1157,7 @@ class CycleTrainer(Trainer):
                     }
                     metrics.update(computed_metrics)
 
+        self.log(metrics)
         self._memory_tracker.stop_and_update_metrics(metrics)
+
         return metrics

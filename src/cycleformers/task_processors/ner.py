@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import zip_longest
 from typing import Literal
@@ -39,7 +40,11 @@ class CONLL2003ProcessorConfig(ProcessorConfig):
 
     dataset_name: str = "eriktks/conll2003"
     preset: Literal["entity_seqs"] | None = "entity_seqs"
-    # trust_remote_code: bool = False
+    # TODO: work out how to allow this param to multiple dataclasses in CLI
+    # trust_remote_code: bool = field(
+    #     default=True,
+    #     metadata={"help": "Must be enabled to load the dataset", "dest": "trust-remote-code"}
+    # )
     sep_token: str = "|"
 
 
@@ -237,9 +242,9 @@ class CONLL2003Processor(BaseProcessor):
         # Ensure formatting of sep token is correct
         self.config: CONLL2003ProcessorConfig = config  # type annotation for config
         self.sep_token = config.sep_token.strip()
-        self.evaluation_metrics = ["f1", "accuracy"]
 
-    def compute_metrics(self, eval_pred: EvalGeneration) -> dict[str, float]:
+    # Computes sentence to entity sequence metrics (dataset A)
+    def compute_metrics_A(self, eval_pred: EvalGeneration) -> dict[str, float]:
         """Compute metrics for NER task."""
         metrics = evaluate.load("seqeval")
 
@@ -250,7 +255,10 @@ class CONLL2003Processor(BaseProcessor):
         predictions_list: list[list[str]] = [predictions]
         references_list: list[list[str]] = [references]
 
-        return metrics.compute(predictions=predictions_list, references=references_list)
+        return metrics.compute(predictions=predictions_list, references=references_list, zero_division=0)
+
+    def compute_metrics(self) -> dict[str, Callable[[EvalGeneration], dict[str, float]]]:
+        return {"A": self.compute_metrics_A}
 
     def preprocess(self, dataset: DatasetDict) -> tuple[DatasetDict, DatasetDict]:
         original_cols = dataset["train"].column_names
