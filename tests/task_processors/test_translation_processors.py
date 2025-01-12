@@ -194,6 +194,7 @@ class TestTranslationProcessor:
         processor = TranslationProcessor(config)
 
         eval_pred = EvalGeneration(predictions=predictions, labels=labels)
-        metrics = processor.compute_metrics(eval_pred)
+        compute_metrics_fn = processor.compute_metrics()["A"]
+        metrics = compute_metrics_fn(eval_pred)
 
         assert pytest.approx(metrics["sacrebleu_score"], abs=0.1) == expected_bleu
