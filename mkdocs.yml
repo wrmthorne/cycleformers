@@ -8,8 +8,9 @@ theme:
   palette:
     # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
-      scheme: default
-      primary: black
+      scheme: slate
+      primary: deep purple
+      accent: purple
       toggle:
         icon: material/brightness-auto
         name: Switch to light mode
@@ -17,7 +18,8 @@ theme:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: black
+      primary: deep purple
+      accent: purple
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
@@ -25,7 +27,8 @@ theme:
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: black
+      primary: deep purple
+      accent: purple
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
@@ -42,6 +45,13 @@ theme:
     - navigation.instant.progress
     - content.code.annotate
     - content.code.copy
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+    - blog.author
+    - blog.categories
+    - blog.pagination
 
 nav:
   - Get Started:
@@ -53,15 +63,20 @@ nav:
     - Conceptual Overview: conceptual_reference/index.md
     - Cycle-Consistency Training: conceptual_reference/cycle_consistency_training.md
     - MACCT: conceptual_reference/macct.md
+    - Task Processors: conceptual_reference/task_processors.md
+    - Evaluation: conceptual_reference/evaluation.md
   - Examples:
-    - Example: examples/index.md
+    - Overview: examples/index.md
     - CycleNER: examples/cycle_ner.md
-    - WMT2014: examples/wmt2014.md
+    - WMT2014: examples/wmt_2014.md
   - API Reference:
+    - Overview: api_reference/index.md
     - CycleTrainer: api_reference/cycle_trainer.md
     - Configuration: api_reference/configuration.md
     - Cycles: api_reference/cycles.md
     - Task Processors: api_reference/task_processors.md
+  - Blog:
+    - blog/index.md
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -73,14 +88,36 @@ markdown_extensions:
         - name: mermaid
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed
+  - footnotes
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 plugins:
+  - search
+  - blog:
+      blog_dir: blog
+      post_url_format: "{slug}"
+      authors: true
+      categories: true
+  - git-revision-date-localized:
+      enable_creation_date: true
   - mkdocstrings:
       default_handler: python
       handlers:
         python:
-          paths: [cycleformers]  # Path to your source code
+          paths: [cycleformers]
           options:
             show_source: true
             show_root_heading: true
             heading_level: 1
+  - tags
+  - social:
+      cards_layout_options:
+        background_color: "#1a1a1a"
+        color: "#ffffff"

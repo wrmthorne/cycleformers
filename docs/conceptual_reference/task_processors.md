@@ -1,7 +1,5 @@
 # Task Processors
 
-🚧 This section is under construction. 🚧
-
 When using task_processors, which splits are downloaded and the size of them can be controlled via the datasets `slice split` syntax. For example, the following will download the first 100 samples from the train split of the WMT14 dataset and the first 30 samples from the test split.
 
 ```python
@@ -43,4 +41,4 @@ More information on the syntax for `slice split` can be found in the [datasets d
 
 ::: src.cycleformers.task_processors.ner.reconstruct_sentence
 
-::: src.cycleformers.task_processors.ner.ner_to_sequences
+::: src.cycleformers.task_processors.ner.bio_to_entity_seq

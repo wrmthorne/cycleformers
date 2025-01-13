@@ -5,7 +5,7 @@
 
 lsLoRA ([Kalajdzievski, Damjan 2023](https://huggingface.co/papers/2312.03732)) scales adapters during each forward pass by `lora_alpha/math.sqrt(r)` which stabilizes performance at higher ranks $r$ ([rsLoRA docs](https://huggingface.co/papers/2312.03732)). 
 
-DoRA ([Liu et al. 2024](https://arxiv.org/abs/2402.09353)) decomposes weight updates into magnitude and direction which they show is better correlated with full fine-tuning loss signals. This technique is particularly useful at low-ranks but can incurr a significant speed penalty. Significant performance gains can be made at the expense of higher VRAM usage by using `ephemeral_gpu_offload=True`. More info can be found at the [DoRA docs](ephemeral_gpu_offload=True).
+DoRA ([Liu et al. 2024](https://arxiv.org/abs/2402.09353)) decomposes weight updates into magnitude and direction which they show is better correlated with full fine-tuning loss signals. This technique is particularly useful at low-ranks but can incurr a significant speed penalty. Significant performance gains can be made at the expense of higher VRAM usage by using `ephemeral_gpu_offload=True`. More info can be found at the [DoRA docs](https://arxiv.org/abs/2402.09353).
 
 
 LoRA+ ([Hayou et al. 2024](https://arxiv.org/abs/2402.12354)) is an optimisation strategy for LoRA that allows for different learning rates for adapter matrices A and B. This can increase fine-tuning speed by up to 2x and *potentially* boost performance on some tasks by 1-2% ([LoRA+ docs](https://arxiv.org/abs/2402.12354)).

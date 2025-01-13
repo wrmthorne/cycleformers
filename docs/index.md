@@ -23,4 +23,4 @@ A Python library for efficient cycle-consistency training of transformer models.
 
 - [Conceptual Reference](conceptual_reference/task_processors.md)
 - [API Reference](api_reference/task_processors.md)
-- [Examples](examples/translation_wmt14/train.py)
+- [Examples](examples/index.md)
