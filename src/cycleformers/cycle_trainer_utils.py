@@ -66,7 +66,24 @@ class DataCollatorForLanguageModelingAndEval:
         # During eval, preserve the original labels for generation comparison
         else:
             if "labels" in features[0]:
-                batch["labels"] = torch.tensor([f["labels"] for f in features])
+                # Pad labels to the same length
+                labels = [f["labels"] for f in features]
+                max_label_length = max(len(label) for label in labels)
+                padded_labels = []
+
+                for label in labels:
+                    padding_length = max_label_length - len(label)
+                    if padding_length > 0:
+                        # Use -100 for padding to match training behavior
+                        padded_label = torch.cat(
+                            [torch.tensor(label), torch.full((padding_length,), -100, dtype=torch.long)]
+                        )
+                    else:
+                        padded_label = torch.tensor(label)
+                    padded_labels.append(padded_label)
+
+                batch["labels"] = torch.stack(padded_labels)
+
             # You might also want to preserve original text
             if "target_text" in features[0]:
                 batch["target_text"] = [f["target_text"] for f in features]

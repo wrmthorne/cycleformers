@@ -213,28 +213,36 @@ def maybe_valid_sentence_to_parts(sentence: str, sep_token: str) -> list[str]:
 class CONLL2003Processor(BaseProcessor):
     """Processor for the CONLL2003 Named Entity Recognition dataset.
 
-    This processor handles the CONLL2003 dataset which contains text annotated with named entities.
-    It converts the dataset into two formats:
-    - Dataset A: Raw text -> Entity sequences
-    - Dataset B: Entity sequences -> Raw text
-
-    The processor:
-    1. Loads the CONLL2003 dataset
-    2. Converts the token-level NER annotations into sequence format
-    3. Creates two complementary datasets for cycle training
+    This processor converts NER data between raw text and entity sequence formats for cycle training.
+    It supports both directions:
+        - Text -> Entity sequences (e.g. "John works at Google" -> "John | person Google | organization")
+        - Entity sequences -> Text (e.g. "John | person Google | organization" -> "John works at Google")
 
     Args:
-        config (CONLL2003ProcessorConfig): Configuration object controlling processor behavior.
-            Includes settings like separator token between entities and their types.
+        config (`CONLL2003ProcessorConfig`, *optional*):
+            The configuration controlling processor behavior. Includes settings like separator token
+            between entities and their types. Defaults to `CONLL2003ProcessorConfig()`.
+
+    The processor handles:
+        - Loading and preprocessing CONLL2003-style datasets
+        - Converting token-level NER annotations to sequence format
+        - Creating complementary datasets for cycle training
+        - Computing evaluation metrics using seqeval
 
     Example:
+        >>> from cycleformers.task_processors import CONLL2003Processor
+        >>> from cycleformers.task_processors.ner import CONLL2003ProcessorConfig
+        >>>
         >>> config = CONLL2003ProcessorConfig(sep_token=" | ")
         >>> processor = CONLL2003Processor(config)
         >>> dataset_A, dataset_B = processor.process()
-        >>> print(dataset_A["train"][`0`])
+        >>> print(dataset_A["train"][0])
         {'text': 'John Smith works at Google.'}
-        >>> print(dataset_B["train"][`0`])
+        >>> print(dataset_B["train"][0])
         {'text': 'John Smith | person Google | organization'}
+
+    For more details on NER processors and their configurations, see the
+    [documentation](https://wrmthorne.github.io/cycleformers/conceptual_reference/task_processors).
     """
 
     def __init__(self, config: CONLL2003ProcessorConfig = CONLL2003ProcessorConfig()):

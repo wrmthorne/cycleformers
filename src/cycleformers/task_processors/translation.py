@@ -62,23 +62,25 @@ class TranslationProcessorConfig(ProcessorConfig):
 
 
 class TranslationProcessor(BaseProcessor):
-    """Processor for translation datasets.
+    """Processor for machine translation datasets.
 
-    This processor handles translation datasets in various formats and converts them into
-    cycleformers-compatible format. It supports both:
-    - Standard parallel corpora (source -> target)
-    - Back-translation style training (target -> source)
-
-    The processor:
-    1. Loads the translation dataset (streaming for large datasets)
-    2. Extracts source and target text
-    3. Creates two complementary datasets for cycle training
+    This processor handles translation datasets in various formats and converts them into cycleformers-compatible format.
+    It supports both standard parallel corpora (source -> target) and back-translation style training (target -> source).
 
     Args:
-        config (TranslationProcessorConfig): Configuration object controlling processor behavior.
-            Includes settings like dataset name, language pairs, and column names.
+        config (`TranslationProcessorConfig`, *optional*):
+            The configuration controlling processor behavior. Includes settings like dataset name,
+            language pairs, and column names. Defaults to `TranslationProcessorConfig()`.
+
+    The processor handles different dataset formats:
+        - Nested dictionary format (e.g. WMT datasets): `{'translation': {'en': '...', 'de': '...'}}`
+        - Flat dictionary format: `{'source': '...', 'target': '...'}`
+        - Custom formats via `preprocessing_fn`
 
     Example:
+        >>> from cycleformers.task_processors import TranslationProcessor
+        >>> from cycleformers.task_processors.translation import TranslationProcessorConfig
+        >>>
         >>> config = TranslationProcessorConfig(
         ...     dataset_name="wmt14",
         ...     dataset_config_name="de-en",
@@ -91,6 +93,9 @@ class TranslationProcessor(BaseProcessor):
         {'text': 'The cat sat on the mat.'}
         >>> print(dataset_B["train"][0])
         {'text': 'Die Katze saß auf der Matte.'}
+
+    For more details on translation processors and their configurations, see the
+    [documentation](https://wrmthorne.github.io/cycleformers/conceptual_reference/task_processors).
     """
 
     def __init__(self, config: TranslationProcessorConfig = TranslationProcessorConfig()):

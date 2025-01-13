@@ -80,108 +80,78 @@ compute_metrics: ComputeMetricsFn | dict[str, ComputeMetricsFn] | None
 
 
 class CycleTrainer(Trainer):
-    """A trainer class that implements cycle training for language models.
+    """A trainer class for cycle training of language models.
 
-    CycleTrainer extends the Hugging Face Trainer to support cycle training between two language models.
-    It can handle both encoder-decoder and causal language models, with support for PEFT adapters.
-
-    The trainer implements a cycle where:
-    1. Model A generates text from Model B's training data
-    2. Model A is trained to reconstruct Model B's original input
-    3. Model B generates text from Model A's training data
-    4. Model B is trained to reconstruct Model A's original input
+    This trainer extends the HuggingFace Trainer to support cycle training between two models or two adapters of a single model.
+    It handles both standard cycle training (two separate models) and memory-efficient cycle training (single model with PEFT adapters).
 
     Args:
-        args (CycleTrainingArguments): Training arguments specific to cycle training
-        models (nn.Module | dict[str, nn.Module] | None): The models to train. Can be:
-            - A single model with two PEFT adapters named 'A' and 'B'
-            - A dictionary with keys 'A' and 'B' containing separate models
-            - None (for testing/subclassing)
-        tokenizers (PreTrainedTokenizerBase | dict[str, PreTrainedTokenizerBase] | None):
-            The tokenizers to use. Can be:
-            - A single tokenizer shared between both models
-            - A dictionary with keys 'A' and 'B' containing separate tokenizers
-            - None (for testing/subclassing)
-        train_dataset_A: Training dataset for model A
-        train_dataset_B: Training dataset for model B
-        eval_dataset_A: Evaluation dataset for model A
-        eval_dataset_B: Evaluation dataset for model B
-        data_collator_A: Data collator for model A
-        data_collator_B: Data collator for model B
-        callbacks: List of callbacks to use during training
-        peft_configs (PeftConfig | dict[str, PeftConfig] | None): PEFT configurations. Can be:
-            - A single config to create identical adapters
-            - A dictionary with keys 'A' and 'B' for different configurations
-            - None if not using PEFT
+        args (`CycleTrainingArguments`):
+            The arguments to be used for training.
+        models (`Union[PreTrainedModel, Dict[str, PreTrainedModel], str, PathLike]`, *optional*):
+            The model(s) to train. Can be:
+            - A single model for MACCT (memory-efficient) training
+            - A dictionary with keys 'A' and 'B' for standard cycle training
+            - A path to a model which will be duplicated for standard training or used as-is for MACCT
+        tokenizers (`Union[PreTrainedTokenizerBase, Dict[str, PreTrainedTokenizerBase], str, PathLike]`, *optional*):
+            The tokenizer(s) to use. Similar to models, can be single, dictionary, or path.
+        train_dataset_A (`datasets.Dataset`, *optional*):
+            The dataset to use for training model/adapter A.
+        train_dataset_B (`datasets.Dataset`, *optional*):
+            The dataset to use for training model/adapter B.
+        eval_dataset_A (`datasets.Dataset`, *optional*):
+            The dataset to use for evaluating model/adapter A.
+        eval_dataset_B (`datasets.Dataset`, *optional*):
+            The dataset to use for evaluating model/adapter B.
+        data_collator_A (`Union[DataCollatorForLanguageModelingAndEval, DataCollatorForSeq2Seq]`, *optional*):
+            The data collator to use for model/adapter A. If not provided, will be inferred from model type.
+        data_collator_B (`Union[DataCollatorForLanguageModelingAndEval, DataCollatorForSeq2Seq]`, *optional*):
+            The data collator to use for model/adapter B. If not provided, will be inferred from model type.
+        compute_metrics (`Union[Dict[str, Callable], Callable]`, *optional*):
+            The metrics to compute during evaluation. Can be a single callable or a dict mapping 'A'/'B' to callables.
+        callbacks (`List[TrainerCallback]`, *optional*):
+            A list of callbacks to use during training.
+        peft_configs (`Union[PeftConfig, Dict[str, PeftConfig]]`, *optional*):
+            PEFT configuration(s) for memory-efficient training. Required for MACCT mode.
 
-    Examples:
-        Basic usage with two separate models:
+    Example:
+        >>> from cycleformers import CycleTrainer, CycleTrainingArguments
         >>> from transformers import AutoModelForCausalLM, AutoTokenizer
-        >>> from cycleformers import CycleTrainingArguments
         >>>
-        >>> # Initialize models and tokenizers
-        >>> model_A = AutoModelForCausalLM.from_pretrained("gpt2-small")
-        >>> model_B = AutoModelForCausalLM.from_pretrained("gpt2-small")
-        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2-small")
-        >>> tokenizer.pad_token = tokenizer.eos_token
-        >>>
-        >>> # Create trainer
+        >>> # Standard cycle training with two models
+        >>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2")
+        >>> args = CycleTrainingArguments(output_dir="gpt2-cct")
         >>> trainer = CycleTrainer(
-        ...     args=CycleTrainingArguments(output_dir="./output"),
-        ...     models={"A": model_A, "B": model_B},
+        ...     args=args,
+        ...     models=model,  # Will be duplicated internally
         ...     tokenizers=tokenizer,
-        ...     train_dataset_A=train_dataset_A,
-        ...     train_dataset_B=train_dataset_B
+        ...     train_dataset_A=dataset_A,
+        ...     train_dataset_B=dataset_B
         ... )
-
-        Using PEFT with a single model and two adapters:
+        >>> trainer.train()
+        >>>
+        >>> # Memory-efficient training with PEFT
         >>> from peft import LoraConfig
-        >>> from transformers import AutoModelForCausalLM, AutoTokenizer
-        >>> from cycleformers import CycleTrainingArguments
-        >>>
-        >>> # Initialize base model and tokenizer
-        >>> base_model = AutoModelForCausalLM.from_pretrained("gpt2-small")
-        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2-small")
-        >>> tokenizer.pad_token = tokenizer.eos_token
-        >>>
-        >>> # Create PEFT config
-        >>> peft_config = LoraConfig(
-        ...     r=8,
-        ...     lora_alpha=32,
-        ...     target_modules=["q_proj", "v_proj"],
-        ...     lora_dropout=0.05,
-        ...     bias="none"
-        ... )
-        >>>
-        >>> # Create trainer with PEFT
+        >>> peft_config = LoraConfig(r=8, lora_alpha=32)
+        >>> args = CycleTrainingArguments(output_dir="gpt2-macct", use_macct=True)
         >>> trainer = CycleTrainer(
-        ...     args=CycleTrainingArguments(output_dir="./output"),
-        ...     models=base_model,
+        ...     args=args,
+        ...     models=model,
         ...     tokenizers=tokenizer,
-        ...     train_dataset_A=train_dataset_A,
-        ...     train_dataset_B=train_dataset_B,
-        ...     peft_configs=peft_config  # Will create two identical adapters
+        ...     train_dataset_A=dataset_A,
+        ...     train_dataset_B=dataset_B,
+        ...     peft_configs=peft_config  # Will be used for both adapters
         ... )
+        >>> trainer.train()
 
-        Using different PEFT configs for each adapter:
-        >>> peft_configs = {
-        ...     "A": LoraConfig(r=8, lora_alpha=32),
-        ...     "B": LoraConfig(r=16, lora_alpha=64)
-        ... }
-        >>> trainer = CycleTrainer(
-        ...     args=CycleTrainingArguments(output_dir="./output"),
-        ...     models=base_model,
-        ...     tokenizers=tokenizer,
-        ...     train_dataset_A=train_dataset_A,
-        ...     train_dataset_B=train_dataset_B,
-        ...     peft_configs=peft_configs  # Different config for each adapter
-        ... )
+    For more details and examples, see the [documentation](https://wrmthorne.github.io/cycleformers/).
     """
 
     def __init__(
         self,
         args: "CycleTrainingArguments",
-        models: nn.Module | dict[str, nn.Module] | str | PathLike[str] | None = None,
+        models: PreTrainedModel | dict[str, PreTrainedModel] | str | PathLike[str] | None = None,
         tokenizers: PreTrainedTokenizerBase | dict[str, PreTrainedTokenizerBase] | str | PathLike[str] | None = None,
         train_dataset_A: datasets.Dataset | None = None,
         train_dataset_B: datasets.Dataset | None = None,
@@ -189,7 +159,7 @@ class CycleTrainer(Trainer):
         eval_dataset_B: datasets.Dataset | None = None,
         data_collator_A: DataCollatorForLanguageModelingAndEval | DataCollatorForSeq2Seq | None = None,
         data_collator_B: DataCollatorForLanguageModelingAndEval | DataCollatorForSeq2Seq | None = None,
-        compute_metrics: dict[str, Callable[[EvalGeneration], dict]] | Callable[[EvalGeneration], dict] | None = None,
+        compute_metrics: dict[str, Callable] | Callable | None = None,
         callbacks: list[TrainerCallback] | None = None,
         peft_configs: "PeftConfig | dict[str, PeftConfig] | None" = None,
     ):
@@ -713,14 +683,21 @@ class CycleTrainer(Trainer):
         return self.optimizer, self.lr_scheduler
 
     def train(self) -> TrainOutput:
-        """Train models using cycle training.
+        """Train the model(s) using cycle training.
+
+        The training process alternates between:
+        1. Model A generating text from Model B's training data and training to reconstruct B's input
+        2. Model B generating text from Model A's training data and training to reconstruct A's input
 
         Returns:
-            TrainOutput: Contains training metrics and state
+            [`~transformers.trainer_utils.TrainOutput`]
+                The final loss, the number of steps, and the metrics dictionary.
 
-        Examples:
+        Example:
             >>> trainer.train()
-            TrainOutput(global_step=1000, training_loss=2.4, metrics={})
+            TrainOutput(global_step=1000, training_loss=2.4, metrics={'train_loss_A': 2.1, 'train_loss_B': 2.7})
+
+        For more details on the training process, see the [documentation](https://wrmthorne.github.io/cycleformers/conceptual_reference/training).
         """
         # Must start as early as possible
         self._memory_tracker.start()
