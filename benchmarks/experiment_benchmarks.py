@@ -23,7 +23,7 @@ def load_config(config_path):
         return yaml.safe_load(f)
 
 
-def get_training_args(global_config, dataset_config, mode_config):
+def get_args(global_config, dataset_config, mode_config):
     """Merge training arguments from different config levels."""
     training_args = {
         **(global_config.get('trainer_args', {})),
@@ -40,7 +40,7 @@ def get_training_args(global_config, dataset_config, mode_config):
     return training_args
 
 
-def run_benchmark(training_args, model_config, dataset_A, dataset_B, compute_metrics, dataset_name, model_name, output_dir, use_macct,peft_config=None):
+def run_benchmark(training_args, model_config, dataset_A, dataset_B, compute_metrics, dataset_name, model_name, output_dir, use_macct, peft_config=None):
     print(f"\nRunning benchmark for {dataset_name} with {model_name} - MACCT mode: {use_macct}\n")
     print(f"\nTraining args: {training_args}\n")
 
@@ -112,6 +112,7 @@ def get_training_config(config, dataset_name, model_name):
     
     # Get base model args
     model_args = model_config['model_args'].copy()
+    generation_config = model_config.get('generation_config', {}).copy()
 
     # Get training args from all levels and merge
     training_args = config.get('training_args', {}).copy()
@@ -138,7 +139,7 @@ def get_training_config(config, dataset_name, model_name):
     if use_macct and model_args.get('use_peft', False):
         peft_config = get_peft_config(base_model_config)
     
-    return dataset_config, training_args, base_model_config, peft_config, use_macct
+    return dataset_config, training_args, base_model_config, peft_config, generation_config, use_macct
 
 def main():
     parser = argparse.ArgumentParser()
@@ -160,7 +161,7 @@ def main():
         
         for model_name in config['models']:
             
-            dataset_config, training_args, model_config, peft_config, use_macct = get_training_config(
+            dataset_config, training_args, model_config, peft_config, generation_config, use_macct = get_training_config(
                 config, task, model_name
             )
             
@@ -177,7 +178,8 @@ def main():
                 model_name=model_name,
                 output_dir=args.output_dir,
                 use_macct=use_macct,
-                peft_config=peft_config
+                peft_config=peft_config,
+                generation_configs=generation_config
             )
 
 if __name__ == "__main__":

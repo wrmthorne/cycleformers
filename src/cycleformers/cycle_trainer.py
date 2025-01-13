@@ -339,9 +339,9 @@ class CycleTrainer(Trainer):
             )
 
         if generation_configs is None:
-            generation_configs = {"A": GenerationConfig(), "B": GenerationConfig()}
+            self.generation_configs = {"A": GenerationConfig(), "B": GenerationConfig()}
         elif isinstance(generation_configs, GenerationConfig):
-            generation_configs = {"A": generation_configs, "B": generation_configs}
+            self.generation_configs = {"A": generation_configs, "B": generation_configs}
         elif isinstance(generation_configs, dict):
             if not all(key in generation_configs for key in ["A", "B"]):
                 raise ValueError("generation_configs dict must contain at least one of the keys 'A' or 'B'")
