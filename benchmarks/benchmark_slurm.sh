@@ -16,10 +16,10 @@ mkdir -p logs
 
 ENV_NAME="cycleformers-benchmarks"
 SETUP_ENV=false
+CUDA_VERSION=12.1.1
 
-
-module load cuDNN/8.9.2.26-CUDA-12.1.1
-module load Anaconda3/2022.05
+module load Anaconda3/2024.03
+# module load cuDNN/8.9.2.26-CUDA-${CUDA_VERSION}  # Doesn't exist on stanage?
 
 if ! conda env list | grep -q $ENV_NAME; then
     conda create -n $ENV_NAME python=3.11 -y

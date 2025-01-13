@@ -16,6 +16,7 @@ from tqdm import tqdm
 from transformers import (
     AutoTokenizer,
     DataCollatorForSeq2Seq,
+    GenerationConfig,
     PretrainedConfig,
     PreTrainedModel,
     PreTrainedTokenizerBase,
@@ -162,6 +163,7 @@ class CycleTrainer(Trainer):
         compute_metrics: dict[str, Callable] | Callable | None = None,
         callbacks: list[TrainerCallback] | None = None,
         peft_configs: "PeftConfig | dict[str, PeftConfig] | None" = None,
+        generation_configs: "GenerationConfig | dict[str, GenerationConfig] | None" = None,
     ):
         self.args = args
         self.is_macct_model = self.args.use_macct
@@ -335,6 +337,14 @@ class CycleTrainer(Trainer):
             tokenizer.padding_side = (
                 "left" if not self._get_config(model).is_encoder_decoder else tokenizer.padding_side
             )
+
+        if generation_configs is None:
+            generation_configs = {"A": GenerationConfig(), "B": GenerationConfig()}
+        elif isinstance(generation_configs, GenerationConfig):
+            generation_configs = {"A": generation_configs, "B": generation_configs}
+        elif isinstance(generation_configs, dict):
+            if not all(key in generation_configs for key in ["A", "B"]):
+                raise ValueError("generation_configs dict must contain at least one of the keys 'A' or 'B'")
 
         self.tokenizer_A = tokenizer_A
         self.tokenizer_B = tokenizer_B
@@ -1098,11 +1108,10 @@ class CycleTrainer(Trainer):
             all_labels = []
             for batch in tqdm(eval_dataloader, desc=f"Evaluating Model {model_name}"):
                 with torch.no_grad():
-                    # gen_config = # TODO: Need to accept generation config for models
                     outputs = model.generate(
                         input_ids=batch["input_ids"],
                         attention_mask=batch.get("attention_mask", None),
-                        # generation_config=gen_config,
+                        generation_config=self.generation_configs[model_name],
                     )
                     all_preds.extend(outputs.cpu().numpy())
 
